@@ -16,10 +16,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init?.headers,
     },
   });
-  const body = await response.json();
+  const body = response.status === 204 ? null : await response.json();
   if (!response.ok)
-    throw new Error(body.error ?? "The operation could not be completed");
-  return body.data as T;
+    throw new Error(body?.error ?? "The operation could not be completed");
+  return body?.data as T;
 }
 
 export const api = {
@@ -58,5 +58,25 @@ export const api = {
     request<{ id: string }>("/stones", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+  updateStone: (stoneId: string, data: Record<string, unknown>) =>
+    request<{ id: string }>(`/stones/${encodeURIComponent(stoneId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  addStoneImages: (
+    stoneId: string,
+    images: Array<{ dataUrl: string; captured: boolean }>,
+  ) =>
+    request<{ uploaded: number }>(
+      `/stones/${encodeURIComponent(stoneId)}/images`,
+      {
+        method: "POST",
+        body: JSON.stringify({ images }),
+      },
+    ),
+  deleteStoneImage: (stoneId: string, imageId: number) =>
+    request<void>(`/stones/${encodeURIComponent(stoneId)}/images/${imageId}`, {
+      method: "DELETE",
     }),
 };

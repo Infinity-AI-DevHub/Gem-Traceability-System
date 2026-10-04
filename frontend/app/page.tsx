@@ -1,17 +1,23 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
+import QRCode from "react-qr-code";
+import { toast } from "sonner";
 import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Camera,
   ClipboardCheck,
   Download,
   Gem,
   History,
+  ImagePlus,
   LayoutDashboard,
   LogOut,
   Menu,
+  Pencil,
   Plus,
   QrCode,
   Search,
@@ -19,6 +25,7 @@ import {
   ShoppingBag,
   TrendingUp,
   Truck,
+  Trash2,
   Users,
   WandSparkles,
   X,
@@ -64,7 +71,15 @@ type Operation =
   | "payment"
   | "hold"
   | "clear-hold"
-  | "price";
+  | "price"
+  | "sales-handover"
+  | "sales-return"
+  | "sales-complete";
+type PhotoDraft = {
+  id?: number;
+  dataUrl: string;
+  captured: boolean;
+};
 const nav = [
   ["dashboard", "Command centre", LayoutDashboard],
   ["inventory", "Stone register", Gem],
@@ -73,7 +88,7 @@ const nav = [
   ["custody", "Custody & locations", Truck],
   ["stocktake", "Stocktake", ClipboardCheck],
   ["quality", "Quality & exceptions", ClipboardCheck],
-  ["sales", "Sales & payments", ShoppingBag],
+  ["sales", "Salesman trials", ShoppingBag],
   ["reports", "Reports", TrendingUp],
   ["contacts", "Directory", Users],
 ] as const;
@@ -207,18 +222,22 @@ export default function Home() {
     [notice, setNotice] = useState(""),
     [menu, setMenu] = useState(false),
     [search, setSearch] = useState(""),
-    [counted, setCounted] = useState<string[]>([]);
+    [counted, setCounted] = useState<string[]>([]),
+    [editing, setEditing] = useState<string | null>(null);
   const stone =
     ledger.stones.find((s) => s.id === selected) || ledger.stones[0];
+  const fail = (error: unknown, fallback: string) => {
+    const message = error instanceof Error ? error.message : fallback;
+    setNotice(message);
+    toast.error(message);
+  };
   const refresh = async () => {
     try {
       const data = await api.ledger();
       setLedger(data);
       setSelected((current) => current || data.stones[0]?.id || "");
     } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : "Could not load the database",
-      );
+      fail(error, "Could not load the database");
     }
   };
   const navigate = (p: Page, id?: string) => {
@@ -226,11 +245,22 @@ export default function Home() {
     setPage(p);
     setMenu(false);
     setSearch("");
+    setEditing(null);
+  };
+  const edit = (id: string) => {
+    setSelected(id);
+    setEditing(id);
+    setPage("intake");
+    setMenu(false);
+    setSearch("");
   };
   const open = (op: Operation, id?: string) => {
     const stoneId = id || stone?.id;
     if (!stoneId) {
-      setNotice("Receive a stone before starting this operation.");
+      fail(
+        new Error("Receive a stone before starting this operation."),
+        "Operation unavailable",
+      );
       return;
     }
     setTarget(stoneId);
@@ -238,13 +268,13 @@ export default function Home() {
     setOperation(op);
   };
   const flash = (message: string) => {
-    setNotice(message);
-    window.setTimeout(() => setNotice(""), 5500);
+    setNotice("");
+    toast.success(message);
   };
   const submitOperation = async (form: FormData) => {
     const op = operation;
     if (!op) return;
-    const id = target;
+    const id = txt(form.get("stoneId")) || target;
     const s = ledger.stones.find((item) => item.id === id);
     if (!s) return;
     try {
@@ -256,38 +286,73 @@ export default function Home() {
       await refresh();
       flash("Operation saved to the database.");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Operation failed");
+      fail(error, "Operation failed");
     }
   };
-  const register = async (form: FormData) => {
+  const saveStone = async (
+    form: FormData,
+    photos: PhotoDraft[],
+    removedImageIds: number[],
+  ) => {
     const type = txt(form.get("type")),
       origin = txt(form.get("origin")),
       weight = number(form.get("weight")),
       purchase = number(form.get("purchase"));
     if (!type || !origin || weight <= 0 || purchase < 0) {
-      setNotice("Gem type, origin and positive carat weight are required.");
+      fail(
+        new Error("Gem type, origin and positive carat weight are required."),
+        "Stone details are incomplete",
+      );
       return;
     }
     try {
-      const result = await api.intake({
+      const payload = {
         gemType: type,
         origin,
         weight,
         color: txt(form.get("color")),
         shape: txt(form.get("shape")),
+        cutStyle: txt(form.get("cut")),
         purchaseCost: purchase,
         treatmentDisclosure: txt(form.get("treatment")) || "Not assessed",
         certificateReference: txt(form.get("certificate")) || null,
-        sellerName: txt(form.get("seller")) || null,
+        sellerId: number(form.get("sellerId")) || null,
+        sellerName: txt(form.get("newSellerName")) || null,
+        sellerPhone: txt(form.get("newSellerPhone")) || null,
+        sellerEmail: txt(form.get("newSellerEmail")) || null,
+        sellerLocality: txt(form.get("newSellerLocality")) || null,
         locationName: txt(form.get("location")) || "Main vault · Intake",
         acquiredOn: txt(form.get("date")) || today(),
         notes: txt(form.get("notes")),
-      });
+      };
+      const current = editing
+        ? ledger.stones.find((item) => item.id === editing)
+        : undefined;
+      const result = current
+        ? await api.updateStone(current.id, {
+            ...payload,
+            expectedVersion: current.version,
+          })
+        : await api.intake(payload);
+      for (const imageId of removedImageIds) {
+        await api.deleteStoneImage(result.id, imageId);
+      }
+      const newImages = photos
+        .filter((photo) => !photo.id)
+        .map((photo) => ({
+          dataUrl: photo.dataUrl,
+          captured: photo.captured,
+        }));
+      if (newImages.length) await api.addStoneImages(result.id, newImages);
       await refresh();
       navigate("stone", result.id);
-      flash(`${result.id} registered in MySQL.`);
+      flash(
+        current
+          ? `${result.id} updated and recorded in its lifecycle history.`
+          : `${result.id} registered in MySQL.`,
+      );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Intake failed");
+      fail(error, "Intake failed");
     }
   };
   const stocktake = (id: string, missing: boolean) => {
@@ -300,10 +365,13 @@ export default function Home() {
       .then(async () => {
         if (!missing) setCounted([...counted, id]);
         await refresh();
+        flash(
+          missing
+            ? `${id} marked as missing and placed on hold.`
+            : `${id} verified in the stocktake.`,
+        );
       })
-      .catch((error) =>
-        setNotice(error instanceof Error ? error.message : "Stocktake failed"),
-      );
+      .catch((error) => fail(error, "Stocktake failed"));
   };
   if (!loggedIn)
     return (
@@ -315,20 +383,24 @@ export default function Home() {
             await refresh();
             setNotice("");
             setLoggedIn(true);
+            toast.success("Welcome back. The workspace is ready.");
           } catch (error) {
-            setNotice(
-              error instanceof Error ? error.message : "Sign in failed",
-            );
+            fail(error, "Sign in failed");
           }
         }}
       />
     );
   const signOut = async () => {
-    await api.logout();
-    setLedger(emptyLedger);
-    setLoggedIn(false);
+    try {
+      await api.logout();
+      setLedger(emptyLedger);
+      setLoggedIn(false);
+      toast.success("Signed out safely.");
+    } catch (error) {
+      fail(error, "Sign out failed");
+    }
   };
-  const actions = { navigate, open, register, download, flash };
+  const actions = { navigate, open, edit, saveStone, download, flash };
   return (
     <div className="app-shell ops-shell">
       {menu && (
@@ -410,7 +482,7 @@ export default function Home() {
               aria-label="Search stones"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search stone ID, gem type or locality"
+              placeholder="Search product ID, stone ID or gem type"
             />
           </div>
           <div className="top-actions">
@@ -426,14 +498,6 @@ export default function Home() {
           </div>
         </header>
         <div className="page-wrap">
-          {notice && (
-            <div className="ops-notice" role="status">
-              {notice}
-              <button onClick={() => setNotice("")} aria-label="Dismiss">
-                <X size={15} />
-              </button>
-            </div>
-          )}
           {search ? (
             <SearchResults ledger={ledger} query={search} navigate={navigate} />
           ) : page === "dashboard" ? (
@@ -443,7 +507,17 @@ export default function Home() {
           ) : page === "stone" && stone ? (
             <StoneDetail ledger={ledger} stone={stone} actions={actions} />
           ) : page === "intake" ? (
-            <Intake register={register} navigate={navigate} />
+            <Intake
+              key={editing ?? "new-stone"}
+              saveStone={saveStone}
+              navigate={navigate}
+              sellers={ledger.sellers}
+              stone={
+                editing
+                  ? ledger.stones.find((item) => item.id === editing)
+                  : undefined
+              }
+            />
           ) : page === "workshop" ? (
             <Workshop ledger={ledger} actions={actions} />
           ) : page === "custody" ? (
@@ -491,7 +565,12 @@ export default function Home() {
 type Actions = {
   navigate: (p: Page, id?: string) => void;
   open: (o: Operation, id?: string) => void;
-  register: (f: FormData) => void;
+  edit: (id: string) => void;
+  saveStone: (
+    form: FormData,
+    photos: PhotoDraft[],
+    removedImageIds: number[],
+  ) => void;
   download: typeof download;
   flash: (m: string) => void;
 };
@@ -626,7 +705,9 @@ function StoneLink({
       </span>
       <span>
         <strong>{stone.type}</strong>
-        <small>{stone.id}</small>
+        <small>
+          {stone.productId} · {stone.id}
+        </small>
       </span>
     </button>
   );
@@ -635,9 +716,9 @@ function StoneLink({
 function Dashboard({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
   const active = ledger.stones.filter((s) => s.status !== "Sold"),
     openJobs = ledger.jobs.filter((j) => j.status !== "Returned"),
-    outstanding = ledger.sales
-      .filter((s) => s.status === "Sold")
-      .reduce((n, s) => n + s.price - s.paid, 0);
+    salesmanRevenue = ledger.salesmanHandovers
+      .filter((handover) => handover.status === "Sold")
+      .reduce((total, handover) => total + handover.finalPrice, 0);
   return (
     <>
       <Heading
@@ -664,20 +745,20 @@ function Dashboard({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
           </small>
         </div>
         <div className="metric">
-          <span>Reserved / held</span>
+          <span>With salesmen / held</span>
           <strong>
             {
               ledger.stones.filter((s) =>
-                ["Reserved", "On Hold"].includes(s.status),
+                ["With Salesman", "On Hold"].includes(s.status),
               ).length
             }
           </strong>
           <small>Not available for sale</small>
         </div>
         <div className="metric">
-          <span>Receivables</span>
-          <strong>{money(outstanding)}</strong>
-          <small>From completed sales</small>
+          <span>Salesman sales</span>
+          <strong>{money(salesmanRevenue)}</strong>
+          <small>Final recorded selling prices</small>
         </div>
       </div>
       <div className="ops-two">
@@ -695,7 +776,8 @@ function Dashboard({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                       {job.id} · {stone.type}
                     </strong>
                     <small>
-                      {job.status} · {job.provider} · due {job.due}
+                      {job.status} · handed over {job.handoverDate} · due{" "}
+                      {job.due}
                     </small>
                   </div>
                   <button
@@ -717,10 +799,14 @@ function Dashboard({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
             {!openJobs.length && <p className="ops-empty">No open jobs.</p>}
             <div className="ops-queue-row">
               <div>
-                <strong>Reservations</strong>
+                <strong>Salesman handovers</strong>
                 <small>
-                  {ledger.sales.filter((s) => s.status === "Reserved").length}{" "}
-                  awaiting final sale or release
+                  {
+                    ledger.salesmanHandovers.filter(
+                      (handover) => handover.status === "With salesman",
+                    ).length
+                  }{" "}
+                  awaiting sale or return
                 </small>
               </div>
               <button onClick={() => actions.navigate("sales")}>
@@ -812,7 +898,7 @@ function SearchResults({
   navigate: Actions["navigate"];
 }) {
   const found = ledger.stones.filter((s) =>
-    `${s.id} ${s.type} ${s.origin} ${s.seller}`
+    `${s.productId} ${s.qrToken} ${s.id} ${s.type} ${s.origin} ${s.seller}`
       .toLowerCase()
       .includes(query.toLowerCase()),
   );
@@ -840,7 +926,7 @@ function SearchResults({
         ))}
         {!found.length && (
           <p className="ops-empty">
-            No stone matches. Try a Stone ID, gem type or locality.
+            No stone matches. Try a Product ID, Stone ID, gem type or locality.
           </p>
         )}
       </Panel>
@@ -853,7 +939,7 @@ function Inventory({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
   const shown = ledger.stones.filter(
     (s) =>
       (filter === "All" || s.status === filter) &&
-      `${s.id} ${s.type} ${s.origin}`
+      `${s.productId} ${s.id} ${s.type} ${s.origin}`
         .toLowerCase()
         .includes(query.toLowerCase()),
   );
@@ -873,7 +959,7 @@ function Inventory({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
             "Available",
             "In Cutting",
             "In Treatment",
-            "Reserved",
+            "With Salesman",
             "On Hold",
             "Sold",
           ].map((f) => (
@@ -901,6 +987,7 @@ function Inventory({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
               actions.download(
                 "stone-register.csv",
                 [
+                  "Product ID",
                   "Stone ID",
                   "Gem type",
                   "Origin",
@@ -912,6 +999,7 @@ function Inventory({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                   "Asking LKR",
                 ],
                 shown.map((s) => [
+                  s.productId,
                   s.id,
                   s.type,
                   s.origin,
@@ -985,7 +1073,9 @@ function StoneDetail({
 }) {
   const events = ledger.events.filter((e) => e.stoneId === stone.id),
     jobs = ledger.jobs.filter((j) => j.stoneId === stone.id),
-    sales = ledger.sales.filter((x) => x.stoneId === stone.id),
+    salesmanHandovers = ledger.salesmanHandovers.filter(
+      (handover) => handover.stoneId === stone.id,
+    ),
     cost =
       stone.purchase +
       jobs
@@ -1002,7 +1092,17 @@ function StoneDetail({
       </button>
       <div className="stone-hero ops-hero">
         <div className="gem-visual">
-          <Gem size={65} strokeWidth={1} />
+          {stone.images[0] ? (
+            <Image
+              unoptimized
+              width={1000}
+              height={1000}
+              src={stone.images[0].url}
+              alt={`${stone.type} ${stone.id}`}
+            />
+          ) : (
+            <Gem size={65} strokeWidth={1} />
+          )}
         </div>
         <div className="stone-title">
           <div>
@@ -1010,13 +1110,22 @@ function StoneDetail({
             <span className="stone-id">{stone.id}</span>
           </div>
           <h1>{stone.type}</h1>
+          <strong className="product-id">{stone.productId}</strong>
           <p>
             {stone.color} · {stone.shape} · {stone.origin}
           </p>
         </div>
-        <button className="ops-secondary" onClick={() => window.print()}>
-          <QrCode size={17} /> Print record
-        </button>
+        <div className="stone-hero-actions">
+          <button
+            className="ops-secondary"
+            onClick={() => actions.edit(stone.id)}
+          >
+            <Pencil size={17} /> Edit details
+          </button>
+          <button className="ops-secondary" onClick={() => window.print()}>
+            <QrCode size={17} /> Print record
+          </button>
+        </div>
       </div>
       <div className="ops-detail-grid">
         <div className="ops-detail-main">
@@ -1026,9 +1135,12 @@ function StoneDetail({
           >
             <div className="fact-grid">
               {[
+                ["Product ID", stone.productId],
+                ["Stone ID", stone.id],
                 ["Current weight", `${stone.weight.toFixed(2)} ct`],
                 ["Intake weight", `${stone.originalWeight.toFixed(2)} ct`],
-                ["Shape & cut", stone.shape],
+                ["Shape", stone.shape],
+                ["Cut", stone.cut],
                 ["Colour", stone.color],
                 ["Origin", stone.origin],
                 ["Treatment statement", stone.treatment],
@@ -1042,6 +1154,25 @@ function StoneDetail({
               ))}
             </div>
           </Panel>
+          {stone.images.length > 0 && (
+            <Panel
+              title="Stone images"
+              sub="Square reference images stored with this stone"
+            >
+              <div className="stone-gallery">
+                {stone.images.map((image, index) => (
+                  <Image
+                    unoptimized
+                    width={1000}
+                    height={1000}
+                    key={image.id}
+                    src={image.url}
+                    alt={`${stone.type} view ${index + 1}`}
+                  />
+                ))}
+              </div>
+            </Panel>
+          )}
           <Panel
             title="Chain of custody & lifecycle"
             sub={`${events.length} permanent lifecycle entries`}
@@ -1073,7 +1204,7 @@ function StoneDetail({
                       {j.id} · {j.kind}
                     </strong>
                     <small>
-                      {j.provider} · {j.status}
+                      {j.workshop} · {j.provider} · {j.status}
                     </small>
                   </span>
                   <span>
@@ -1082,26 +1213,56 @@ function StoneDetail({
                   </span>
                 </div>
               ))}
-              {sales.map((s) => (
-                <div key={s.id}>
+              {salesmanHandovers.map((handover) => (
+                <div key={handover.id}>
                   <span>
                     <strong>
-                      {s.id} · {s.status}
+                      {handover.id} · {handover.status}
                     </strong>
                     <small>
-                      {s.buyer} · paid {money(s.paid)}
+                      {handover.salesman} · quoted {money(handover.quotedPrice)}
                     </small>
                   </span>
-                  <span>{money(s.price)}</span>
+                  <span>
+                    {handover.status === "Sold"
+                      ? money(handover.finalPrice)
+                      : handover.deadline}
+                  </span>
                 </div>
               ))}
-              {jobs.length + sales.length === 0 && (
+              {jobs.length + salesmanHandovers.length === 0 && (
                 <p>No jobs or transactions yet.</p>
               )}
             </div>
           </Panel>
         </div>
         <aside className="ops-detail-aside">
+          <Panel
+            title="Product identity"
+            sub="Unique QR identity for this stone"
+          >
+            <div className="qr-identity">
+              <div
+                className="qr-code"
+                aria-label={`QR code for ${stone.productId}`}
+              >
+                <QRCode
+                  value={JSON.stringify({
+                    system: "ORIGIN",
+                    productId: stone.productId,
+                    stoneId: stone.id,
+                    token: stone.qrToken,
+                  })}
+                  size={168}
+                  level="H"
+                  title={`Product ${stone.productId}`}
+                />
+              </div>
+              <strong>{stone.productId}</strong>
+              <span>{stone.id}</span>
+              <small>Scan to identify this exact stone record.</small>
+            </div>
+          </Panel>
           <Panel title="Current custody">
             <div className="ops-aside-data">
               <span>LOCATION</span>
@@ -1133,8 +1294,10 @@ function StoneDetail({
                   <Action onClick={() => actions.open("job", stone.id)}>
                     Start cutting / treatment
                   </Action>
-                  <Action onClick={() => actions.open("reserve", stone.id)}>
-                    Reserve stone
+                  <Action
+                    onClick={() => actions.open("sales-handover", stone.id)}
+                  >
+                    Hand to salesman
                   </Action>
                   <Action onClick={() => actions.open("sale", stone.id)}>
                     Complete sale
@@ -1147,13 +1310,17 @@ function StoneDetail({
                   </Action>
                 </>
               )}
-              {stone.status === "Reserved" && (
+              {stone.status === "With Salesman" && (
                 <>
-                  <Action onClick={() => actions.open("sale", stone.id)}>
-                    Complete reserved sale
+                  <Action
+                    onClick={() => actions.open("sales-complete", stone.id)}
+                  >
+                    Record salesman sale
                   </Action>
-                  <Action onClick={() => actions.open("release", stone.id)}>
-                    Release reservation
+                  <Action
+                    onClick={() => actions.open("sales-return", stone.id)}
+                  >
+                    Receive from salesman
                   </Action>
                 </>
               )}
@@ -1165,11 +1332,6 @@ function StoneDetail({
               {["In Cutting", "In Treatment"].includes(stone.status) && (
                 <Action onClick={() => actions.navigate("workshop")}>
                   Review active job
-                </Action>
-              )}
-              {stone.status === "Sold" && (
-                <Action onClick={() => actions.open("payment", stone.id)}>
-                  Record payment
                 </Action>
               )}
               {stone.status !== "Sold" && (
@@ -1195,52 +1357,272 @@ function StoneDetail({
   );
 }
 
+const gemTypes = [
+  "Blue Sapphire",
+  "Yellow Sapphire",
+  "Padparadscha Sapphire",
+  "White Sapphire",
+  "Star Sapphire",
+  "Ruby",
+  "Pink Spinel",
+  "Red Spinel",
+  "Blue Spinel",
+  "Chrysoberyl",
+  "Cat's Eye Chrysoberyl",
+  "Alexandrite",
+  "Emerald",
+  "Aquamarine",
+  "Tourmaline",
+  "Garnet",
+  "Topaz",
+  "Zircon",
+  "Moonstone",
+  "Quartz",
+];
+const stoneShapes = [
+  "Rough",
+  "Round",
+  "Oval",
+  "Cushion",
+  "Emerald",
+  "Pear",
+  "Marquise",
+  "Princess",
+  "Asscher",
+  "Radiant",
+  "Heart",
+  "Trillion",
+  "Baguette",
+  "Kite",
+  "Shield",
+  "Hexagon",
+  "Octagon",
+  "Cabochon",
+  "Freeform",
+];
+const cutStyles = ["Rough", "Oval", "Cushion", "Emerald", "Round"];
+
+function editable(value: string) {
+  return ["Not recorded", "None", "Not assigned"].includes(value) ? "" : value;
+}
+
+async function squarePhoto(file: File) {
+  const source = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("The image could not be read"));
+    reader.readAsDataURL(file);
+  });
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const element = document.createElement("img");
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error("The image could not be opened"));
+    element.src = source;
+  });
+  const size = Math.min(image.naturalWidth, image.naturalHeight);
+  const canvas = document.createElement("canvas");
+  canvas.width = 1000;
+  canvas.height = 1000;
+  canvas
+    .getContext("2d")
+    ?.drawImage(
+      image,
+      (image.naturalWidth - size) / 2,
+      (image.naturalHeight - size) / 2,
+      size,
+      size,
+      0,
+      0,
+      1000,
+      1000,
+    );
+  return canvas.toDataURL("image/jpeg", 0.84);
+}
+
 function Intake({
-  register,
+  saveStone,
   navigate,
+  stone,
+  sellers,
 }: {
-  register: (f: FormData) => void;
+  saveStone: Actions["saveStone"];
   navigate: Actions["navigate"];
+  stone?: Stone;
+  sellers: Ledger["sellers"];
 }) {
+  const [photos, setPhotos] = useState<PhotoDraft[]>(
+    () =>
+      stone?.images.map((image) => ({
+        id: image.id,
+        dataUrl: image.url,
+        captured: image.captured,
+      })) ?? [],
+  );
+  const [removedImageIds, setRemovedImageIds] = useState<number[]>([]);
+  const [photoError, setPhotoError] = useState("");
+  const [selectedSeller, setSelectedSeller] = useState(
+    stone?.sellerId ? String(stone.sellerId) : "",
+  );
+  const addPhotos = async (files: FileList | null, captured: boolean) => {
+    if (!files?.length) return;
+    const remaining = 4 - photos.length;
+    if (remaining <= 0) {
+      const message = "A stone can have up to four square images.";
+      setPhotoError(message);
+      toast.error(message);
+      return;
+    }
+    try {
+      const prepared = await Promise.all(
+        Array.from(files)
+          .slice(0, remaining)
+          .map(async (file) => ({
+            dataUrl: await squarePhoto(file),
+            captured,
+          })),
+      );
+      setPhotos((current) => [...current, ...prepared]);
+      const limitedMessage =
+        files.length > remaining
+          ? `Only the first ${remaining} image${remaining === 1 ? "" : "s"} was added.`
+          : "";
+      setPhotoError(limitedMessage);
+      if (limitedMessage) toast.warning(limitedMessage);
+      else
+        toast.success(
+          `${prepared.length} stone image${prepared.length === 1 ? "" : "s"} added.`,
+        );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "The image could not be prepared";
+      setPhotoError(message);
+      toast.error(message);
+    }
+  };
+  const removePhoto = (photo: PhotoDraft) => {
+    setPhotos((current) => current.filter((item) => item !== photo));
+    if (photo.id) setRemovedImageIds((current) => [...current, photo.id!]);
+  };
   return (
     <>
       <Heading
         kicker="PURCHASE & INTAKE"
-        title="Receive a new stone"
-        sub="Confirm the physical item, source and initial characteristics before assigning its permanent ID."
+        title={stone ? `Edit ${stone.id}` : "Receive a new stone"}
+        sub={
+          stone
+            ? "Update the working record without changing its permanent Stone ID or earlier history."
+            : "Confirm the physical item, source and initial characteristics before assigning its permanent ID."
+        }
       />
-      <form className="panel ops-form-card" action={register}>
+      <form
+        className="panel ops-form-card"
+        action={(form) => saveStone(form, photos, removedImageIds)}
+      >
         <div className="ops-section-head">
           <h2>01 · Identity & source</h2>
-          <p>A unique Stone ID is generated when this record is saved.</p>
+          <p>
+            {stone
+              ? "The permanent Stone ID remains unchanged."
+              : "A unique Stone ID is generated when this record is saved."}
+          </p>
         </div>
         <div className="ops-fields">
           <label>
             Gem type *
-            <select name="type" required defaultValue="">
-              <option value="" disabled>
-                Select type
-              </option>
-              <option>Blue Sapphire</option>
-              <option>Yellow Sapphire</option>
-              <option>Ruby</option>
-              <option>Pink Spinel</option>
-              <option>Chrysoberyl</option>
-              <option>Other</option>
-            </select>
+            <input
+              name="type"
+              list="gem-type-options"
+              required
+              defaultValue={stone?.type ?? ""}
+              placeholder="Select or type a gem type"
+            />
+            <datalist id="gem-type-options">
+              {gemTypes.map((item) => (
+                <option key={item} value={item} />
+              ))}
+            </datalist>
+            <small>Select a suggestion or type a new gem type.</small>
           </label>
           <label>
             Origin / locality *
-            <input name="origin" required placeholder="e.g. Ratnapura" />
+            <input
+              name="origin"
+              required
+              defaultValue={stone?.origin}
+              placeholder="e.g. Ratnapura"
+            />
           </label>
           <label>
             Seller / source
-            <input name="seller" placeholder="Supplier name" />
+            <select
+              name="sellerId"
+              value={selectedSeller}
+              onChange={(event) => setSelectedSeller(event.target.value)}
+            >
+              <option value="">No seller selected</option>
+              {sellers.map((seller) => (
+                <option key={seller.id} value={seller.id}>
+                  {seller.name}
+                  {seller.locality ? ` · ${seller.locality}` : ""}
+                </option>
+              ))}
+              <option value="__new__">＋ Add a new seller</option>
+            </select>
           </label>
           <label>
             Purchase date
-            <input name="date" type="date" defaultValue={today()} />
+            <input
+              name="date"
+              type="date"
+              defaultValue={stone?.acquired ?? today()}
+            />
           </label>
+          {selectedSeller === "__new__" && (
+            <div className="new-seller-fields ops-full">
+              <div className="inline-form-heading">
+                <Plus size={17} />
+                <span>
+                  <strong>New seller details</strong>
+                  <small>
+                    This seller will be saved to the seller directory.
+                  </small>
+                </span>
+              </div>
+              <label>
+                Seller name *
+                <input
+                  name="newSellerName"
+                  required
+                  placeholder="Person or business name"
+                />
+              </label>
+              <label>
+                Phone
+                <input
+                  name="newSellerPhone"
+                  type="tel"
+                  placeholder="Contact number"
+                />
+              </label>
+              <label>
+                Email
+                <input
+                  name="newSellerEmail"
+                  type="email"
+                  placeholder="Email address"
+                />
+              </label>
+              <label>
+                Locality
+                <input
+                  name="newSellerLocality"
+                  placeholder="Town or district"
+                />
+              </label>
+            </div>
+          )}
         </div>
         <div className="ops-section-head">
           <h2>02 · Physical characteristics</h2>
@@ -1258,26 +1640,58 @@ function Intake({
               min="0.001"
               step="0.001"
               required
+              defaultValue={stone?.originalWeight}
               placeholder="0.000"
             />
           </label>
           <label>
-            Shape / cut
-            <select name="shape">
-              <option>Rough</option>
-              <option>Oval</option>
-              <option>Cushion</option>
-              <option>Emerald</option>
-              <option>Round</option>
-            </select>
+            Shape
+            <input
+              name="shape"
+              list="shape-options"
+              defaultValue={stone ? editable(stone.shape) : ""}
+              placeholder="Select or type a shape"
+            />
+            <datalist id="shape-options">
+              {stoneShapes.map((item) => (
+                <option key={item} value={item} />
+              ))}
+            </datalist>
+            <small>
+              Common 1 ct store shapes are included; custom shapes are accepted.
+            </small>
+          </label>
+          <label>
+            Cut
+            <input
+              name="cut"
+              list="cut-options"
+              defaultValue={stone ? editable(stone.cut) : ""}
+              placeholder="Select or type a cut"
+            />
+            <datalist id="cut-options">
+              {cutStyles.map((item) => (
+                <option key={item} value={item} />
+              ))}
+            </datalist>
+            <small>
+              The original choices remain available, and new cuts can be typed.
+            </small>
           </label>
           <label>
             Colour
-            <input name="color" placeholder="Hue, tone and saturation" />
+            <input
+              name="color"
+              defaultValue={stone ? editable(stone.color) : ""}
+              placeholder="Hue, tone and saturation"
+            />
           </label>
           <label>
             Treatment declaration
-            <select name="treatment">
+            <select
+              name="treatment"
+              defaultValue={stone?.treatment ?? "Not assessed"}
+            >
               <option>Not assessed</option>
               <option>No treatment declared</option>
               <option>Heated · dealer disclosed</option>
@@ -1288,16 +1702,83 @@ function Intake({
             Existing lab reference
             <input
               name="certificate"
+              defaultValue={stone ? editable(stone.certificate) : ""}
               placeholder="Optional certificate number"
             />
           </label>
           <label>
             Receiving location
-            <input name="location" placeholder="Main vault · Intake" />
+            <input
+              name="location"
+              defaultValue={stone ? editable(stone.location) : ""}
+              placeholder="Main vault · Intake"
+            />
           </label>
         </div>
         <div className="ops-section-head">
-          <h2>03 · Commercial intake</h2>
+          <h2>03 · Stone images</h2>
+          <p>
+            Add up to four images. Every image is centre-cropped to a consistent
+            1:1 square and stored in MySQL.
+          </p>
+        </div>
+        <div className="photo-capture">
+          <div className="photo-grid">
+            {photos.map((photo, index) => (
+              <div
+                className="photo-tile"
+                key={photo.id ?? `${photo.dataUrl.slice(-18)}-${index}`}
+              >
+                <Image
+                  unoptimized
+                  width={1000}
+                  height={1000}
+                  src={photo.dataUrl}
+                  alt={`Stone preview ${index + 1}`}
+                />
+                <button
+                  type="button"
+                  onClick={() => removePhoto(photo)}
+                  aria-label={`Remove image ${index + 1}`}
+                >
+                  <Trash2 size={16} />
+                </button>
+                {photo.captured && <span>CAMERA</span>}
+              </div>
+            ))}
+            {photos.length < 4 && (
+              <div className="photo-placeholder">
+                <Gem size={28} />
+                <span>{4 - photos.length} image slots</span>
+              </div>
+            )}
+          </div>
+          <div className="photo-actions">
+            <label className="ops-secondary photo-button">
+              <ImagePlus size={18} /> Upload images
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                hidden
+                onChange={(event) => void addPhotos(event.target.files, false)}
+              />
+            </label>
+            <label className="ops-secondary photo-button">
+              <Camera size={18} /> Take photo
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                hidden
+                onChange={(event) => void addPhotos(event.target.files, true)}
+              />
+            </label>
+          </div>
+          {photoError && <p className="field-error">{photoError}</p>}
+        </div>
+        <div className="ops-section-head">
+          <h2>04 · Commercial intake</h2>
         </div>
         <div className="ops-fields">
           <label>
@@ -1307,7 +1788,7 @@ function Intake({
               type="number"
               min="0"
               step="1"
-              defaultValue="0"
+              defaultValue={stone?.purchase ?? 0}
             />
           </label>
           <label className="ops-full">
@@ -1315,6 +1796,7 @@ function Intake({
             <textarea
               name="notes"
               rows={3}
+              defaultValue={stone?.notes}
               placeholder="Inclusions, condition, parcel references and other observations"
             />
           </label>
@@ -1328,7 +1810,7 @@ function Intake({
             Cancel
           </button>
           <button className="primary-button" type="submit">
-            Register stone <ArrowRight size={17} />
+            {stone ? "Save changes" : "Register stone"} <ArrowRight size={17} />
           </button>
         </div>
       </form>
@@ -1405,12 +1887,16 @@ function Workshop({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
               <StoneLink stone={stone} navigate={actions.navigate} />
               <div className="ops-job-facts">
                 <div>
-                  <span>Provider</span>
-                  <strong>{j.provider}</strong>
+                  <span>Workshop / provider</span>
+                  <strong>
+                    {j.workshop} · {j.provider}
+                  </strong>
                 </div>
                 <div>
-                  <span>Due back</span>
-                  <strong>{j.due}</strong>
+                  <span>Handover / due back</span>
+                  <strong>
+                    {j.handoverDate} → {j.due}
+                  </strong>
                 </div>
                 <div>
                   <span>Outgoing weight</span>
@@ -1482,7 +1968,7 @@ function Custody({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
           <small>Cutters or laboratories</small>
         </div>
         <div className="metric">
-          <span>Released to buyers</span>
+          <span>Sold through salesmen</span>
           <strong>
             {ledger.stones.filter((s) => s.status === "Sold").length}
           </strong>
@@ -1749,145 +2235,153 @@ function Quality({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
   );
 }
 function Sales({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
-  const reserved = ledger.sales.filter((s) => s.status === "Reserved"),
-    sold = ledger.sales.filter((s) => s.status === "Sold"),
-    due = sold.reduce((n, s) => n + s.price - s.paid, 0);
+  const active = ledger.salesmanHandovers.filter(
+      (handover) => handover.status === "With salesman",
+    ),
+    returned = ledger.salesmanHandovers.filter(
+      (handover) => handover.status === "Returned",
+    ),
+    sold = ledger.salesmanHandovers.filter(
+      (handover) => handover.status === "Sold",
+    );
   return (
     <>
       <Heading
-        kicker="COMMERCIAL OPERATIONS"
-        title="Sales & payments"
-        sub="Reserve, invoice, collect payment and retain the full chain of custody."
-        button="New sale"
+        kicker="SALESMAN CUSTODY"
+        title="Salesman trials"
+        sub="Hand stones to salesmen, monitor deadlines, receive returns or record a completed sale."
+        button="New handover"
         onClick={() =>
           actions.open(
-            "sale",
+            "sales-handover",
             ledger.stones.find((s) => s.status === "Available")?.id,
           )
         }
       />
       <div className="ops-metrics">
         <div className="metric accent">
-          <span>Completed sales</span>
-          <strong>{money(sold.reduce((n, s) => n + s.price, 0))}</strong>
-          <small>{sold.length} recorded</small>
+          <span>With salesmen</span>
+          <strong>{active.length}</strong>
+          <small>
+            {money(active.reduce((n, h) => n + h.quotedPrice, 0))} quoted
+          </small>
         </div>
         <div className="metric">
-          <span>Reserved value</span>
-          <strong>{money(reserved.reduce((n, s) => n + s.price, 0))}</strong>
-          <small>{reserved.length} commitments</small>
+          <span>Returned unsold</span>
+          <strong>{returned.length}</strong>
+          <small>Received back into custody</small>
         </div>
         <div className="metric">
-          <span>Outstanding balance</span>
-          <strong>{money(due)}</strong>
-          <small>Payment records reconciled</small>
+          <span>Sales completed</span>
+          <strong>{money(sold.reduce((n, h) => n + h.finalPrice, 0))}</strong>
+          <small>{sold.length} salesman sales</small>
         </div>
-      </div>
-      <div className="ops-two">
-        <Panel
-          title="Reservations"
-          sub="These stones are unavailable to other buyers"
-        >
-          <div className="ops-queue">
-            {reserved.map((r) => {
-              const s = ledger.stones.find((x) => x.id === r.stoneId)!;
-              return (
-                <div className="ops-queue-row" key={r.id}>
-                  <div>
-                    <strong>
-                      {s.type} · {r.buyer}
-                    </strong>
-                    <small>
-                      {r.id} · {money(r.price)} · deposit {money(r.paid)}
-                    </small>
-                  </div>
-                  <button onClick={() => actions.open("sale", s.id)}>
-                    Complete <ArrowRight size={14} />
-                  </button>
-                </div>
-              );
-            })}
-            {!reserved.length && (
-              <p className="ops-empty">No active reservations.</p>
-            )}
-          </div>
-        </Panel>
-        <Panel title="Available stock" sub="Start a reservation or direct sale">
-          <div className="ops-queue">
-            {ledger.stones
-              .filter((s) => s.status === "Available")
-              .map((s) => (
-                <div className="ops-queue-row" key={s.id}>
-                  <div>
-                    <strong>
-                      {s.type} · {s.weight.toFixed(2)} ct
-                    </strong>
-                    <small>
-                      {s.id} · {s.asking ? money(s.asking) : "No asking price"}
-                    </small>
-                  </div>
-                  <button onClick={() => actions.open("reserve", s.id)}>
-                    Reserve <ArrowRight size={14} />
-                  </button>
-                </div>
-              ))}
-          </div>
-        </Panel>
       </div>
       <Panel
-        title="Invoice & payment ledger"
-        sub="Sale balances and disclosure snapshots"
+        title="Active handovers"
+        sub="Stones currently held by salesmen for a sales attempt"
       >
         <div className="ops-table-wrap">
           <table className="ops-table">
             <thead>
               <tr>
                 <th>Reference / stone</th>
-                <th>Buyer</th>
-                <th>Sale value</th>
-                <th>Received</th>
-                <th>Outstanding</th>
+                <th>Salesman</th>
+                <th>Quoted price</th>
+                <th>Handed over</th>
+                <th>Deadline</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              {sold.map((s) => (
-                <tr key={s.id}>
-                  <td>
-                    <strong>{s.id}</strong>
-                    <small>{s.stoneId}</small>
-                  </td>
-                  <td>{s.buyer}</td>
-                  <td>{money(s.price)}</td>
-                  <td>{money(s.paid)}</td>
-                  <td>{money(s.price - s.paid)}</td>
-                  <td>
-                    <button
-                      className="ops-link"
-                      disabled={s.paid >= s.price}
-                      onClick={() => actions.open("payment", s.stoneId)}
-                    >
-                      Receive payment <ArrowRight size={15} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {active.map((handover) => {
+                const stone = ledger.stones.find(
+                  (s) => s.id === handover.stoneId,
+                );
+                return (
+                  <tr key={handover.id}>
+                    <td>
+                      <strong>{stone?.type ?? handover.stoneId}</strong>
+                      <small>
+                        {handover.stoneId} · {handover.id}
+                      </small>
+                    </td>
+                    <td>{handover.salesman}</td>
+                    <td>{money(handover.quotedPrice)}</td>
+                    <td>
+                      {new Date(handover.handedOverAt).toLocaleString("en-LK", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}
+                    </td>
+                    <td>{handover.deadline}</td>
+                    <td>
+                      <div className="ops-count-actions">
+                        <button
+                          onClick={() =>
+                            actions.open("sales-return", handover.stoneId)
+                          }
+                        >
+                          Receive
+                        </button>
+                        <button
+                          onClick={() =>
+                            actions.open("sales-complete", handover.stoneId)
+                          }
+                        >
+                          Sold
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+          {!active.length && (
+            <p className="ops-empty">No stones are currently with salesmen.</p>
+          )}
+        </div>
+      </Panel>
+      <Panel
+        title="Handover history"
+        sub="Returned and sold outcomes remain permanently recorded"
+      >
+        <div className="ops-queue">
+          {[...sold, ...returned].map((handover) => (
+            <div className="ops-queue-row" key={handover.id}>
+              <div>
+                <strong>
+                  {handover.stoneId} · {handover.salesman}
+                </strong>
+                <small>
+                  {handover.status} · quoted {money(handover.quotedPrice)}
+                  {handover.status === "Sold"
+                    ? ` · sold ${money(handover.finalPrice)}`
+                    : ""}
+                </small>
+              </div>
+              <Badge value={handover.status} />
+            </div>
+          ))}
         </div>
       </Panel>
     </>
   );
 }
 function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
-  const sold = ledger.sales.filter((s) => s.status === "Sold"),
-    revenue = sold.reduce((n, s) => n + s.price, 0),
+  const sold = ledger.salesmanHandovers.filter(
+      (handover) => handover.status === "Sold",
+    ),
+    revenue = sold.reduce((n, handover) => n + handover.finalPrice, 0),
     cost = sold.reduce(
-      (n, s) =>
+      (n, handover) =>
         n +
-        (ledger.stones.find((x) => x.id === s.stoneId)?.purchase || 0) +
+        (ledger.stones.find((x) => x.id === handover.stoneId)?.purchase || 0) +
         ledger.jobs
-          .filter((j) => j.stoneId === s.stoneId && j.status === "Returned")
+          .filter(
+            (j) => j.stoneId === handover.stoneId && j.status === "Returned",
+          )
           .reduce((a, j) => a + j.cost, 0),
       0,
     );
@@ -1937,7 +2431,7 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
           <div className="ops-bars">
             {[
               "Available",
-              "Reserved",
+              "With Salesman",
               "In Cutting",
               "In Treatment",
               "On Hold",
@@ -1972,6 +2466,7 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                 actions.download(
                   "origin-stones.csv",
                   [
+                    "Product ID",
                     "ID",
                     "Type",
                     "Origin",
@@ -1982,6 +2477,7 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                     "Asking LKR",
                   ],
                   ledger.stones.map((s) => [
+                    s.productId,
                     s.id,
                     s.type,
                     s.origin,
@@ -2029,8 +2525,10 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                     "Job",
                     "Stone",
                     "Type",
+                    "Workshop",
                     "Provider",
                     "Status",
+                    "Handover date",
                     "Due",
                     "Before ct",
                     "After ct",
@@ -2040,8 +2538,10 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                     j.id,
                     j.stoneId,
                     j.kind,
+                    j.workshop,
                     j.provider,
                     j.status,
+                    j.handoverDate,
                     j.due,
                     j.beforeWeight,
                     j.afterWeight || "",
@@ -2055,31 +2555,31 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
             <Action
               onClick={() =>
                 actions.download(
-                  "origin-sales.csv",
+                  "origin-salesman-handovers.csv",
                   [
                     "Reference",
                     "Stone",
-                    "Buyer",
+                    "Salesman",
                     "Status",
-                    "Value LKR",
-                    "Paid LKR",
-                    "Balance LKR",
-                    "Disclosure",
+                    "Quoted LKR",
+                    "Final LKR",
+                    "Handed over",
+                    "Deadline",
                   ],
-                  ledger.sales.map((s) => [
-                    s.id,
-                    s.stoneId,
-                    s.buyer,
-                    s.status,
-                    s.price,
-                    s.paid,
-                    s.price - s.paid,
-                    s.disclosure,
+                  ledger.salesmanHandovers.map((handover) => [
+                    handover.id,
+                    handover.stoneId,
+                    handover.salesman,
+                    handover.status,
+                    handover.quotedPrice,
+                    handover.finalPrice,
+                    handover.handedOverAt,
+                    handover.deadline,
                   ]),
                 )
               }
             >
-              Sales CSV
+              Salesman handovers CSV
             </Action>
           </div>
         </Panel>
@@ -2116,10 +2616,10 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                     </td>
                     <td>{money(s.purchase)}</td>
                     <td>{money(jobs)}</td>
-                    <td>{sale ? money(sale.price) : "—"}</td>
+                    <td>{sale ? money(sale.finalPrice) : "—"}</td>
                     <td>
                       {sale
-                        ? money(sale.price - s.purchase - jobs)
+                        ? money(sale.finalPrice - s.purchase - jobs)
                         : "Not sold"}
                     </td>
                   </tr>
@@ -2138,10 +2638,18 @@ function Directory({ ledger }: { ledger: Ledger }) {
       <Heading
         kicker="TRADE NETWORK"
         title="Directory"
-        sub="Buyers, sellers and external providers linked to your operation."
+        sub="Salesmen, sellers and external providers linked to your operation."
       />
       <div className="contact-grid ops-contacts">
-        {ledger.contacts.map((c, i) => (
+        {[
+          ...ledger.salesmen.map((salesman) => ({
+            name: salesman.name,
+            role: "Salesman",
+            phone: salesman.phone,
+            locality: salesman.locality,
+          })),
+          ...ledger.contacts.filter((contact) => contact.role !== "Buyer"),
+        ].map((c, i) => (
           <article className="panel contact-card" key={c.name}>
             <div className={`contact-avatar tone-${i % 4}`}>
               {c.name
@@ -2179,6 +2687,8 @@ function OperationDialog({
   submit: (f: FormData) => void;
   error: string;
 }) {
+  const [jobKind, setJobKind] = useState<"Cutting" | "Treatment">("Cutting");
+  const [jobWorkshop, setJobWorkshop] = useState("");
   const titles: Record<Operation, string> = {
     job: "Create workshop job",
     dispatch: "Dispatch to provider",
@@ -2192,6 +2702,9 @@ function OperationDialog({
     hold: "Place stone on hold",
     "clear-hold": "Clear exception hold",
     price: "Set asking price",
+    "sales-handover": "Hand stone to salesman",
+    "sales-return": "Receive stone from salesman",
+    "sales-complete": "Record salesman sale",
   };
   const openJobs = ledger.jobs.filter(
       (j) => j.stoneId === stone.id && j.status !== "Returned",
@@ -2201,9 +2714,30 @@ function OperationDialog({
     ),
     sold = ledger.sales.find(
       (s) => s.stoneId === stone.id && s.status === "Sold",
+    ),
+    activeSalesmanHandover = ledger.salesmanHandovers.find(
+      (handover) =>
+        handover.stoneId === stone.id && handover.status === "With salesman",
     );
   const allowed =
-    operation === "job" || operation === "reserve" || operation === "sale";
+    operation === "job" ||
+    operation === "reserve" ||
+    operation === "sale" ||
+    operation === "sales-handover";
+  const kindCode = jobKind === "Cutting" ? "CUTTING" : "TREATMENT";
+  const eligibleWorkshops = ledger.workshops.filter(
+    (workshop) => workshop.type === "BOTH" || workshop.type === kindCode,
+  );
+  const selectedWorkshop = eligibleWorkshops.some(
+    (workshop) => String(workshop.id) === jobWorkshop,
+  )
+    ? jobWorkshop
+    : String(eligibleWorkshops[0]?.id ?? "");
+  const eligibleProviders = ledger.providers.filter(
+    (provider) =>
+      String(provider.workshopId) === selectedWorkshop &&
+      (provider.specialty === "BOTH" || provider.specialty === kindCode),
+  );
   return (
     <Dialog
       open={!!operation}
@@ -2236,27 +2770,162 @@ function OperationDialog({
                   recording.
                 </div>
               )}
-              {allowed && (
+              {allowed && operation !== "sales-handover" && (
                 <label>
                   Stone
                   <input value={`${stone.id} · ${stone.type}`} readOnly />
                 </label>
               )}
+              {operation === "sales-handover" && (
+                <>
+                  <label className="ops-full">
+                    Stone details
+                    <select name="stoneId" defaultValue={stone.id} required>
+                      {ledger.stones
+                        .filter((item) => item.status === "Available")
+                        .map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.productId} · {item.id} · {item.type} ·{" "}
+                            {item.weight.toFixed(2)} ct
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label>
+                    Salesman
+                    <input
+                      name="salesman"
+                      list="salesman-options"
+                      required
+                      placeholder="Search salesman"
+                      autoComplete="off"
+                    />
+                    <datalist id="salesman-options">
+                      {ledger.salesmen.map((salesman) => (
+                        <option key={salesman.id} value={salesman.name}>
+                          {[salesman.locality, salesman.phone]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </option>
+                      ))}
+                    </datalist>
+                  </label>
+                  <label>
+                    Quoted price · LKR
+                    <input
+                      name="price"
+                      type="number"
+                      min="1"
+                      defaultValue={stone.asking || ""}
+                      required
+                    />
+                  </label>
+                  <label>
+                    Deadline date
+                    <input name="deadline" type="date" required />
+                  </label>
+                  <label>
+                    Handover date and time
+                    <input name="handedOverAt" type="datetime-local" required />
+                  </label>
+                </>
+              )}
+              {operation === "sales-return" && (
+                <>
+                  <div className="ops-context ops-full">
+                    {activeSalesmanHandover?.salesman} · quoted{" "}
+                    {money(activeSalesmanHandover?.quotedPrice || 0)} · deadline{" "}
+                    {activeSalesmanHandover?.deadline}
+                  </div>
+                  <label className="ops-full">
+                    Receiving notes
+                    <textarea
+                      name="notes"
+                      rows={3}
+                      placeholder="Condition and acknowledgement when received"
+                    />
+                  </label>
+                </>
+              )}
+              {operation === "sales-complete" && (
+                <>
+                  <div className="ops-context ops-full">
+                    {activeSalesmanHandover?.salesman} · quoted{" "}
+                    {money(activeSalesmanHandover?.quotedPrice || 0)}
+                  </div>
+                  <label>
+                    Final selling price · LKR
+                    <input
+                      name="finalPrice"
+                      type="number"
+                      min="1"
+                      defaultValue={activeSalesmanHandover?.quotedPrice || ""}
+                      required
+                    />
+                  </label>
+                  <div className="ops-context">
+                    The final price may be lower or higher than the quoted
+                    price.
+                  </div>
+                </>
+              )}
               {operation === "job" && (
                 <>
                   <label>
                     Process
-                    <select name="kind">
+                    <select
+                      name="kind"
+                      value={jobKind}
+                      onChange={(event) =>
+                        setJobKind(
+                          event.target.value as "Cutting" | "Treatment",
+                        )
+                      }
+                    >
                       <option>Cutting</option>
                       <option>Treatment</option>
                     </select>
                   </label>
                   <label>
-                    Workshop / provider
-                    <input
-                      name="provider"
+                    Workshop
+                    <select
+                      name="workshopId"
                       required
-                      placeholder="e.g. Saman Stones"
+                      value={selectedWorkshop}
+                      onChange={(event) => setJobWorkshop(event.target.value)}
+                    >
+                      {eligibleWorkshops.map((workshop) => (
+                        <option key={workshop.id} value={workshop.id}>
+                          {workshop.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Provider
+                    <select
+                      key={`${jobKind}-${selectedWorkshop}`}
+                      name="providerId"
+                      required
+                      defaultValue=""
+                    >
+                      <option value="" disabled>
+                        Select provider
+                      </option>
+                      {eligibleProviders.map((provider) => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Handover date
+                    <input
+                      type="date"
+                      name="handoverDate"
+                      required
+                      defaultValue={today()}
                     />
                   </label>
                   <label>

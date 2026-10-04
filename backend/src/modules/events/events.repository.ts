@@ -5,11 +5,23 @@ type Queryable = Pick<PoolConnection, "execute">;
 
 export async function addEvent(
   database: Queryable,
-  input: { stoneId: string; eventType: string; title: string; details: Record<string, unknown>; actorContactId?: number | null },
+  input: {
+    stoneId: string;
+    eventType: string;
+    title: string;
+    details: Record<string, unknown>;
+    actorContactId?: number | null;
+  },
 ) {
   await database.execute(
     "INSERT INTO lifecycle_events (stone_id, event_type, title, details, actor_contact_id) VALUES (?, ?, ?, ?, ?)",
-    [input.stoneId, input.eventType, input.title, JSON.stringify(input.details), input.actorContactId ?? null],
+    [
+      input.stoneId,
+      input.eventType,
+      input.title,
+      JSON.stringify(input.details),
+      input.actorContactId ?? null,
+    ],
   );
 }
 

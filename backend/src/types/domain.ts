@@ -1,8 +1,17 @@
-export const stoneStatuses = ["AVAILABLE", "RESERVED", "IN_CUTTING", "IN_TREATMENT", "SOLD", "ON_HOLD"] as const;
+export const stoneStatuses = [
+  "AVAILABLE",
+  "RESERVED",
+  "IN_CUTTING",
+  "IN_TREATMENT",
+  "SOLD",
+  "ON_HOLD",
+] as const;
 export type StoneStatus = (typeof stoneStatuses)[number];
 
 export type StoneRow = {
   id: string;
+  productId: string;
+  qrToken: string;
   gemType: string;
   origin: string;
   currentWeight: number;

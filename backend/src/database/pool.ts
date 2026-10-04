@@ -13,7 +13,9 @@ export const pool = mysql.createPool({
   namedPlaceholders: true,
 });
 
-export async function transaction<T>(work: (connection: PoolConnection) => Promise<T>): Promise<T> {
+export async function transaction<T>(
+  work: (connection: PoolConnection) => Promise<T>,
+): Promise<T> {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();

@@ -3,45 +3,156 @@ import { asyncHandler } from "../../lib/async-handler.js";
 import { stoneId } from "../../validation/common.js";
 import { listEvents } from "../events/events.repository.js";
 import { findStone, listStones } from "./stones.repository.js";
-import { intakeStone, listStonesQuery, placeHold, transferCustody } from "./stones.schemas.js";
-import { clearStoneHold, holdStone, moveStone, receiveStone } from "./stones.service.js";
+import {
+  addStoneImages,
+  editStone,
+  intakeStone,
+  listStonesQuery,
+  placeHold,
+  transferCustody,
+} from "./stones.schemas.js";
+import {
+  clearStoneHold,
+  editStoneRecord,
+  holdStone,
+  moveStone,
+  receiveStone,
+} from "./stones.service.js";
 import { HttpError } from "../../lib/http-error.js";
+import { pool } from "../../database/pool.js";
+import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 
 export const stonesRouter = Router();
 
-stonesRouter.get("/", asyncHandler(async (request, response) => {
-  const query = listStonesQuery.parse(request.query);
-  response.json({ data: await listStones(query), pagination: { limit: query.limit, offset: query.offset } });
-}));
+stonesRouter.get(
+  "/",
+  asyncHandler(async (request, response) => {
+    const query = listStonesQuery.parse(request.query);
+    response.json({
+      data: await listStones(query),
+      pagination: { limit: query.limit, offset: query.offset },
+    });
+  }),
+);
 
-stonesRouter.post("/", asyncHandler(async (request, response) => {
-  response.status(201).json({ data: await receiveStone(intakeStone.parse(request.body)) });
-}));
+stonesRouter.post(
+  "/",
+  asyncHandler(async (request, response) => {
+    response
+      .status(201)
+      .json({ data: await receiveStone(intakeStone.parse(request.body)) });
+  }),
+);
 
-stonesRouter.get("/:stoneId", asyncHandler(async (request, response) => {
-  const id = stoneId.parse(request.params.stoneId);
-  const stone = await findStone(id);
-  if (!stone) throw new HttpError(404, `Stone ${id} was not found`);
-  response.json({ data: stone });
-}));
+stonesRouter.patch(
+  "/:stoneId",
+  asyncHandler(async (request, response) => {
+    const id = stoneId.parse(request.params.stoneId);
+    response.json({
+      data: await editStoneRecord(id, editStone.parse(request.body)),
+    });
+  }),
+);
 
-stonesRouter.get("/:stoneId/events", asyncHandler(async (request, response) => {
-  const id = stoneId.parse(request.params.stoneId);
-  if (!await findStone(id)) throw new HttpError(404, `Stone ${id} was not found`);
-  response.json({ data: await listEvents(id) });
-}));
+stonesRouter.post(
+  "/:stoneId/images",
+  asyncHandler(async (request, response) => {
+    const id = stoneId.parse(request.params.stoneId);
+    if (!(await findStone(id)))
+      throw new HttpError(404, `Stone ${id} was not found`);
+    const input = addStoneImages.parse(request.body);
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      "SELECT COUNT(*) total FROM stone_images WHERE stone_id=?",
+      [id],
+    );
+    if (Number(rows[0]?.total ?? 0) + input.images.length > 4)
+      throw new HttpError(422, "A stone can have up to four images");
+    for (const [index, image] of input.images.entries()) {
+      const match = image.dataUrl.match(
+        /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/,
+      );
+      if (!match) throw new HttpError(422, "Unsupported image format");
+      const data = Buffer.from(match[2]!, "base64");
+      if (data.length > 2_000_000)
+        throw new HttpError(422, "Each image must be smaller than 2 MB");
+      await pool.execute(
+        "INSERT INTO stone_images (stone_id,image_data,mime_type,sort_order,captured) VALUES (?,?,?,?,?)",
+        [
+          id,
+          data,
+          match[1]!,
+          Number(rows[0]?.total ?? 0) + index,
+          image.captured,
+        ],
+      );
+    }
+    response.status(201).json({ data: { uploaded: input.images.length } });
+  }),
+);
 
-stonesRouter.post("/:stoneId/custody-transfers", asyncHandler(async (request, response) => {
-  const id = stoneId.parse(request.params.stoneId);
-  response.status(201).json({ data: await moveStone(id, transferCustody.parse(request.body)) });
-}));
+stonesRouter.delete(
+  "/:stoneId/images/:imageId",
+  asyncHandler(async (request, response) => {
+    const id = stoneId.parse(request.params.stoneId);
+    const imageId = Number(request.params.imageId);
+    if (!Number.isInteger(imageId) || imageId < 1)
+      throw new HttpError(422, "Invalid image ID");
+    const [result] = await pool.execute<ResultSetHeader>(
+      "DELETE FROM stone_images WHERE id=? AND stone_id=?",
+      [imageId, id],
+    );
+    if (result.affectedRows !== 1)
+      throw new HttpError(404, "Stone image was not found");
+    response.status(204).send();
+  }),
+);
 
-stonesRouter.post("/:stoneId/holds", asyncHandler(async (request, response) => {
-  const id = stoneId.parse(request.params.stoneId);
-  response.status(201).json({ data: await holdStone(id, placeHold.parse(request.body)) });
-}));
+stonesRouter.get(
+  "/:stoneId",
+  asyncHandler(async (request, response) => {
+    const id = stoneId.parse(request.params.stoneId);
+    const stone = await findStone(id);
+    if (!stone) throw new HttpError(404, `Stone ${id} was not found`);
+    response.json({ data: stone });
+  }),
+);
 
-stonesRouter.post("/:stoneId/holds/clear", asyncHandler(async (request, response) => {
-  const id = stoneId.parse(request.params.stoneId);
-  response.json({ data: await clearStoneHold(id, placeHold.parse(request.body)) });
-}));
+stonesRouter.get(
+  "/:stoneId/events",
+  asyncHandler(async (request, response) => {
+    const id = stoneId.parse(request.params.stoneId);
+    if (!(await findStone(id)))
+      throw new HttpError(404, `Stone ${id} was not found`);
+    response.json({ data: await listEvents(id) });
+  }),
+);
+
+stonesRouter.post(
+  "/:stoneId/custody-transfers",
+  asyncHandler(async (request, response) => {
+    const id = stoneId.parse(request.params.stoneId);
+    response
+      .status(201)
+      .json({ data: await moveStone(id, transferCustody.parse(request.body)) });
+  }),
+);
+
+stonesRouter.post(
+  "/:stoneId/holds",
+  asyncHandler(async (request, response) => {
+    const id = stoneId.parse(request.params.stoneId);
+    response
+      .status(201)
+      .json({ data: await holdStone(id, placeHold.parse(request.body)) });
+  }),
+);
+
+stonesRouter.post(
+  "/:stoneId/holds/clear",
+  asyncHandler(async (request, response) => {
+    const id = stoneId.parse(request.params.stoneId);
+    response.json({
+      data: await clearStoneHold(id, placeHold.parse(request.body)),
+    });
+  }),
+);

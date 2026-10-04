@@ -18,16 +18,19 @@ export function createApp() {
   app.disable("x-powered-by");
   app.use(helmet());
   app.use(cors({ origin: env.FRONTEND_ORIGIN, credentials: true }));
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "10mb" }));
   if (env.NODE_ENV !== "test") app.use(pinoHttp());
 
   app.get("/api/v1/health", (_request, response) => {
     response.json({ status: "ok", service: "origin-backend" });
   });
-  app.get("/api/v1/health/database", asyncHandler(async (_request, response) => {
-    await pool.query("SELECT 1");
-    response.json({ status: "ok", database: "mysql" });
-  }));
+  app.get(
+    "/api/v1/health/database",
+    asyncHandler(async (_request, response) => {
+      await pool.query("SELECT 1");
+      response.json({ status: "ok", database: "mysql" });
+    }),
+  );
   app.use("/api/v1/auth", authRouter);
   app.use("/api/v1", requireAuth);
   app.use("/api/v1/stones", stonesRouter);

@@ -12,8 +12,9 @@
     "start": "node dist/server.js",
     "lint": "eslint src tests",
     "test": "vitest run",
-    "db:migrate": "tsx src/database/migrate.ts"
-    ,"admin:create": "tsx src/database/create-admin.ts"
+    "db:migrate": "tsx src/database/migrate.ts",
+    "db:seed:review": "tsx src/database/seed-review.ts",
+    "admin:create": "tsx src/database/create-admin.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -1017,6 +1017,32 @@ button {
   color: #3d746a;
   background: radial-gradient(circle at 35% 30%, #eef8f4, #bdd9d1 48%, #7daea1);
 }
+.gem-visual img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+.stone-hero-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.stone-hero-actions button {
+  white-space: nowrap;
+}
+.stone-gallery {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.stone-gallery img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 1px solid #dce3dc;
+}
 .stone-title > div {
   display: flex;
   align-items: center;
@@ -1024,6 +1050,18 @@ button {
 }
 .stone-id {
   color: #8a918d;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+.product-id {
+  display: inline-flex;
+  width: fit-content;
+  margin-bottom: 6px;
+  border: 1px solid #cfe0d8;
+  border-radius: 999px;
+  background: #edf5f1;
+  padding: 5px 9px;
+  color: #24594e;
   font-size: 11px;
   letter-spacing: 0.08em;
 }
@@ -2221,6 +2259,40 @@ button {
   flex-direction: column;
   gap: 20px;
 }
+.qr-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 20px 22px;
+  text-align: center;
+}
+.qr-code {
+  width: min(100%, 196px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  margin-bottom: 14px;
+  border: 1px solid #e1e7e2;
+  border-radius: 16px;
+  background: #fff;
+  padding: 14px;
+  box-shadow: 0 10px 26px #17372d12;
+}
+.qr-code svg {
+  width: 100%;
+  height: 100%;
+}
+.qr-identity > strong {
+  color: #173f36;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+}
+.qr-identity > span,
+.qr-identity > small {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
 .ops-timeline-row {
   display: flex;
   gap: 13px;
@@ -2343,6 +2415,111 @@ button {
   color: #364b3e;
   font-size: 12px;
   font-weight: 700;
+}
+.ops-fields label > small {
+  color: #7d887f;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.new-seller-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 20px;
+  border: 1px solid #dce5dd;
+  border-radius: 14px;
+  background: #f5f8f5;
+  padding: 16px;
+}
+.inline-form-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #275744;
+}
+.inline-form-heading > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.inline-form-heading small {
+  color: #78847c;
+  font-size: 10px;
+  font-weight: 500;
+}
+.photo-capture {
+  padding: 12px 26px 28px;
+}
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.photo-tile,
+.photo-placeholder {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 1;
+  border-radius: 16px;
+  border: 1px solid #d6ded7;
+  background: #f3f6f2;
+}
+.photo-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.photo-tile button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: #182d25cc;
+  backdrop-filter: blur(8px);
+}
+.photo-tile > span {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  border-radius: 99px;
+  padding: 4px 7px;
+  color: #fff;
+  background: #173c30cc;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.photo-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-style: dashed;
+  color: #789084;
+}
+.photo-placeholder span {
+  font-size: 10px;
+}
+.photo-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+.photo-button {
+  cursor: pointer;
+}
+.field-error {
+  margin: 10px 0 0;
+  color: #9e3e3e;
+  font-size: 11px;
 }
 .ops-fields input,
 .ops-fields select,
@@ -3432,6 +3609,35 @@ button {
   }
   .gem-visual {
     border-radius: 20px;
+  }
+  .stone-hero-actions {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+  .stone-hero-actions button {
+    flex: 1;
+    justify-content: center;
+  }
+  .stone-gallery,
+  .photo-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .photo-capture {
+    padding: 10px 16px 24px;
+  }
+  .photo-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .photo-button {
+    min-height: 48px;
+    justify-content: center;
+  }
+  .new-seller-fields {
+    grid-template-columns: 1fr;
+  }
+  .inline-form-heading {
+    grid-column: 1;
   }
   .contact-card {
     border-radius: 16px;
