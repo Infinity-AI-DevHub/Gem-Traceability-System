@@ -358,6 +358,24 @@ curl -I http://127.0.0.1:3500/login
 curl http://127.0.0.1:4500/api/v1/health
 ```
 
+### Tailwind `Cannot find native binding` during build
+
+This means Linux optional packages were not installed, commonly because
+`node_modules` came from another operating system or npm omitted optional
+dependencies. The repository pins the required Linux x64 GNU binding. Keep the
+committed lockfile and rebuild dependencies on the VPS:
+
+```bash
+cd /www/wwwroot/gem-track
+rm -rf /www/wwwroot/gem-track/node_modules
+rm -rf /www/wwwroot/gem-track/frontend/.next
+npm cache verify
+npm ci --include=optional
+npm run build
+```
+
+Never upload a development computer's `node_modules` directory to the VPS.
+
 ### Database connection fails
 
 - Recheck the aaPanel database name and dedicated user's password.
