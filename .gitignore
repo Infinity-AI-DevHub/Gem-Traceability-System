@@ -30,6 +30,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+!.env.production.example
 
 
 # typescript
@@ -39,3 +41,5 @@ next-env.d.ts
 .codex/
 outputs/
 work/
+backend/uploads/*
+!backend/uploads/.gitkeep

@@ -7,20 +7,28 @@ import { env } from "../config/env.js";
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDirectory = join(here, "../../migrations");
 
-const connection = await mysql.createConnection({
+const settings = {
   host: env.DB_HOST,
   port: env.DB_PORT,
   user: env.DB_USER,
   password: env.DB_PASSWORD,
   multipleStatements: true,
-});
+};
 
+let connection;
 try {
+  connection = await mysql.createConnection({ ...settings, database: env.DB_NAME });
+} catch (error) {
+  if ((error as { code?: string }).code !== "ER_BAD_DB_ERROR") throw error;
+  connection = await mysql.createConnection(settings);
   const databaseName = `\`${env.DB_NAME.replaceAll("`", "``")}\``;
   await connection.query(
-    `CREATE DATABASE IF NOT EXISTS ${databaseName} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+    `CREATE DATABASE ${databaseName} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
   );
   await connection.changeUser({ database: env.DB_NAME });
+}
+
+try {
   await connection.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
     name VARCHAR(255) NOT NULL PRIMARY KEY,
     applied_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)

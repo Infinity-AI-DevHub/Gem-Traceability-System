@@ -13,13 +13,13 @@ import { commandsRouter } from "./modules/commands/commands.routes.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { requireAuth } from "./middleware/auth.js";
 import { jewelleryRouter } from "./modules/jewellery/jewellery.routes.js";
+import { uploadRoot } from "./lib/image-storage.js";
 
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet());
   app.use(cors({ origin: env.FRONTEND_ORIGIN, credentials: true }));
-  app.use(express.json({ limit: "10mb" }));
   if (env.NODE_ENV !== "test") app.use(pinoHttp());
 
   app.get("/api/v1/health", (_request, response) => {
@@ -32,8 +32,16 @@ export function createApp() {
       response.json({ status: "ok", database: "mysql" });
     }),
   );
-  app.use("/api/v1/auth", authRouter);
-  app.use("/api/v1", requireAuth);
+  app.use("/api/v1/auth", express.json({ limit: "1mb" }), authRouter);
+  app.use("/uploads", requireAuth, express.static(uploadRoot, {
+    fallthrough: false,
+    index: false,
+    cacheControl: false,
+    setHeaders(response) {
+      response.setHeader("Cache-Control", "private, max-age=604800");
+    },
+  }));
+  app.use("/api/v1", requireAuth, express.json({ limit: "120mb" }));
   app.use("/api/v1/stones", stonesRouter);
   app.use("/api/v1/jewellery", jewelleryRouter);
   app.use("/api/v1/ledger", ledgerRouter);

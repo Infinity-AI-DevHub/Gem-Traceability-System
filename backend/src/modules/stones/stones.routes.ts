@@ -24,6 +24,7 @@ import { HttpError } from "../../lib/http-error.js";
 import { pool } from "../../database/pool.js";
 import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { addEvent } from "../events/events.repository.js";
+import { removeStoredImage, storeImage } from "../../lib/image-storage.js";
 
 export const stonesRouter = Router();
 
@@ -85,19 +86,13 @@ stonesRouter.post(
     if (Number(rows[0]?.total ?? 0) + input.images.length > 4)
       throw new HttpError(422, "A stone can have up to four images");
     for (const [index, image] of input.images.entries()) {
-      const match = image.dataUrl.match(
-        /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/,
-      );
-      if (!match) throw new HttpError(422, "Unsupported image format");
-      const data = Buffer.from(match[2]!, "base64");
-      if (data.length > 2_000_000)
-        throw new HttpError(422, "Each image must be smaller than 2 MB");
+      const stored = await storeImage(image.dataUrl, "stones");
       await pool.execute(
-        "INSERT INTO stone_images (stone_id,image_data,mime_type,sort_order,captured) VALUES (?,?,?,?,?)",
+        "INSERT INTO stone_images (stone_id,file_path,mime_type,sort_order,captured) VALUES (?,?,?,?,?)",
         [
           id,
-          data,
-          match[1]!,
+          stored.filePath,
+          stored.mimeType,
           Number(rows[0]?.total ?? 0) + index,
           image.captured,
         ],
@@ -128,7 +123,7 @@ stonesRouter.delete(
     if (!Number.isInteger(imageId) || imageId < 1)
       throw new HttpError(422, "Invalid image ID");
     const [images] = await pool.execute<RowDataPacket[]>(
-      "SELECT mime_type,captured,sort_order FROM stone_images WHERE id=? AND stone_id=? LIMIT 1",
+      "SELECT file_path,mime_type,captured,sort_order FROM stone_images WHERE id=? AND stone_id=? LIMIT 1",
       [imageId, id],
     );
     const [result] = await pool.execute<ResultSetHeader>(
@@ -137,6 +132,7 @@ stonesRouter.delete(
     );
     if (result.affectedRows !== 1)
       throw new HttpError(404, "Stone image was not found");
+    await removeStoredImage(images[0]?.file_path);
     await addEvent(pool, {
       stoneId: id,
       eventType: "IMAGE_REMOVAL",

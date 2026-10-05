@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { RowDataPacket } from "mysql2/promise";
 import { pool } from "../../database/pool.js";
 import { asyncHandler } from "../../lib/async-handler.js";
+import { imageUrl } from "../../lib/image-storage.js";
 
 export const ledgerRouter = Router();
 
@@ -80,7 +81,7 @@ ledgerRouter.get(
         "SELECT * FROM contacts WHERE active=TRUE ORDER BY display_name",
       ),
       pool.query<RowDataPacket[]>(
-        "SELECT id,stone_id,mime_type,TO_BASE64(image_data) image_base64,captured FROM stone_images ORDER BY sort_order,id",
+        "SELECT id,stone_id,file_path,mime_type,TO_BASE64(image_data) image_base64,captured FROM stone_images ORDER BY sort_order,id",
       ),
       pool.query<RowDataPacket[]>(
         "SELECT id,name,workshop_type,phone,address FROM workshops WHERE active=TRUE ORDER BY name",
@@ -92,7 +93,7 @@ ledgerRouter.get(
         "SELECT id,name,phone,email,locality,notes FROM sellers WHERE active=TRUE ORDER BY name",
       ),
       pool.query<RowDataPacket[]>(
-        "SELECT id,seller_id,mime_type,TO_BASE64(image_data) image_base64,captured FROM seller_images ORDER BY sort_order,id",
+        "SELECT id,seller_id,file_path,mime_type,TO_BASE64(image_data) image_base64,captured FROM seller_images ORDER BY sort_order,id",
       ),
       pool.query<RowDataPacket[]>(
         "SELECT id,name,phone,email,locality,notes FROM salesmen WHERE active=TRUE ORDER BY name",
@@ -116,7 +117,7 @@ ledgerRouter.get(
         "SELECT * FROM jewellery_profiles ORDER BY created_at DESC",
       ),
       pool.query<RowDataPacket[]>(
-        "SELECT id,jewellery_id,mime_type,TO_BASE64(image_data) image_base64,captured FROM jewellery_images ORDER BY sort_order,id",
+        "SELECT id,jewellery_id,file_path,mime_type,TO_BASE64(image_data) image_base64,captured FROM jewellery_images ORDER BY sort_order,id",
       ),
       pool.query<RowDataPacket[]>(
         "SELECT id,name,phone,email,address,contact_person FROM companies WHERE active=TRUE ORDER BY name",
@@ -138,7 +139,7 @@ ledgerRouter.get(
       const list = imageMap.get(image.stone_id) ?? [];
       list.push({
         id: Number(image.id),
-        url: `data:${image.mime_type};base64,${image.image_base64}`,
+        url: imageUrl(image),
         captured: Boolean(image.captured),
       });
       imageMap.set(image.stone_id, list);
@@ -151,7 +152,7 @@ ledgerRouter.get(
       const list = jewelleryImageMap.get(image.jewellery_id) ?? [];
       list.push({
         id: Number(image.id),
-        url: `data:${image.mime_type};base64,${image.image_base64}`,
+        url: imageUrl(image),
         captured: Boolean(image.captured),
       });
       jewelleryImageMap.set(image.jewellery_id, list);
@@ -262,7 +263,7 @@ ledgerRouter.get(
             .filter((image) => Number(image.seller_id) === Number(seller.id))
             .map((image) => ({
               id: Number(image.id),
-              url: `data:${image.mime_type};base64,${image.image_base64}`,
+              url: imageUrl(image),
               captured: Boolean(image.captured),
             })),
         })),

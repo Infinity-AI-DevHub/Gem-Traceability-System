@@ -10,6 +10,7 @@ import type {
 } from "./stones.schemas.js";
 import { HttpError } from "../../lib/http-error.js";
 import { randomUUID } from "node:crypto";
+import { storeImage } from "../../lib/image-storage.js";
 
 type Intake = z.infer<typeof intakeStone>;
 type StoneConnection = Parameters<Parameters<typeof transaction>[0]>[0];
@@ -61,16 +62,10 @@ async function resolveSeller(
   );
   const sellerId = Number(rows[0]?.id);
   for (const [index, image] of (input.sellerImages ?? []).entries()) {
-    const match = image.dataUrl.match(
-      /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/,
-    );
-    if (!match) throw new HttpError(422, "Unsupported seller image format");
-    const data = Buffer.from(match[2]!, "base64");
-    if (data.length > 2_000_000)
-      throw new HttpError(422, "Each seller image must be smaller than 2 MB");
+    const stored = await storeImage(image.dataUrl, "sellers");
     await connection.execute(
-      "INSERT INTO seller_images (seller_id,image_data,mime_type,sort_order,captured) VALUES (?,?,?,?,?)",
-      [sellerId, data, match[1]!, index, image.captured],
+      "INSERT INTO seller_images (seller_id,file_path,mime_type,sort_order,captured) VALUES (?,?,?,?,?)",
+      [sellerId, stored.filePath, stored.mimeType, index, image.captured],
     );
   }
   return sellerId;
@@ -151,16 +146,10 @@ async function createStone(
     }
     const created = await requireStone(id, connection);
     for (const [index, image] of (input.images ?? []).entries()) {
-      const match = image.dataUrl.match(
-        /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/,
-      );
-      if (!match) throw new HttpError(422, "Unsupported stone image format");
-      const data = Buffer.from(match[2]!, "base64");
-      if (data.length > 2_000_000)
-        throw new HttpError(422, "Each stone image must be smaller than 2 MB");
+      const stored = await storeImage(image.dataUrl, "stones");
       await connection.execute(
-        "INSERT INTO stone_images (stone_id,image_data,mime_type,sort_order,captured) VALUES (?,?,?,?,?)",
-        [id, data, match[1]!, index, image.captured],
+        "INSERT INTO stone_images (stone_id,file_path,mime_type,sort_order,captured) VALUES (?,?,?,?,?)",
+        [id, stored.filePath, stored.mimeType, index, image.captured],
       );
     }
     await addEvent(connection, {

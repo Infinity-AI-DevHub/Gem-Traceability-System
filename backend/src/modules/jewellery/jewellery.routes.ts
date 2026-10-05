@@ -6,6 +6,7 @@ import { asyncHandler } from "../../lib/async-handler.js";
 import { HttpError } from "../../lib/http-error.js";
 import { addStoneImages } from "../stones/stones.schemas.js";
 import { addEvent } from "../events/events.repository.js";
+import { removeStoredImage, storeImage } from "../../lib/image-storage.js";
 
 export const jewelleryRouter = Router();
 const jewelleryId = z.string().trim().min(5).max(32);
@@ -27,19 +28,13 @@ jewelleryRouter.post(
     if (Number(rows[0]?.total ?? 0) + input.images.length > 4)
       throw new HttpError(422, "A jewellery profile can have up to four images");
     for (const [index, image] of input.images.entries()) {
-      const match = image.dataUrl.match(
-        /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/,
-      );
-      if (!match) throw new HttpError(422, "Unsupported image format");
-      const data = Buffer.from(match[2]!, "base64");
-      if (data.length > 2_000_000)
-        throw new HttpError(422, "Each image must be smaller than 2 MB");
+      const stored = await storeImage(image.dataUrl, "jewellery");
       await pool.execute(
-        "INSERT INTO jewellery_images (jewellery_id,image_data,mime_type,sort_order,captured) VALUES (?,?,?,?,?)",
+        "INSERT INTO jewellery_images (jewellery_id,file_path,mime_type,sort_order,captured) VALUES (?,?,?,?,?)",
         [
           id,
-          data,
-          match[1]!,
+          stored.filePath,
+          stored.mimeType,
           Number(rows[0]?.total ?? 0) + index,
           image.captured,
         ],
@@ -69,7 +64,7 @@ jewelleryRouter.delete(
     const id = jewelleryId.parse(request.params.jewelleryId);
     const imageId = Number(request.params.imageId);
     const [images] = await pool.execute<RowDataPacket[]>(
-      `SELECT ji.mime_type,ji.captured,ji.sort_order,jp.stone_id
+      `SELECT ji.file_path,ji.mime_type,ji.captured,ji.sort_order,jp.stone_id
        FROM jewellery_images ji JOIN jewellery_profiles jp ON jp.id=ji.jewellery_id
        WHERE ji.id=? AND ji.jewellery_id=? LIMIT 1`,
       [imageId, id],
@@ -82,6 +77,7 @@ jewelleryRouter.delete(
     );
     if (result.affectedRows !== 1)
       throw new HttpError(404, "Jewellery image was not found");
+    await removeStoredImage(image.file_path);
     await addEvent(pool, {
       stoneId: image.stone_id,
       eventType: "JEWELLERY_IMAGE_REMOVAL",

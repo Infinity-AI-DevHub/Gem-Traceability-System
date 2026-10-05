@@ -13,6 +13,7 @@
     "lint": "eslint src tests",
     "test": "vitest run",
     "db:migrate": "tsx src/database/migrate.ts",
+    "images:migrate": "tsx src/database/migrate-images.ts",
     "db:seed:review": "tsx src/database/seed-review.ts",
     "admin:create": "tsx src/database/create-admin.ts"
   },
