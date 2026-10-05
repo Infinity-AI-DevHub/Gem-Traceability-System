@@ -330,7 +330,6 @@ await transaction(async (connection) => {
       "Royal blue",
       "Oval",
       980000,
-      1850000,
       "AVAILABLE",
       trayA,
       staff,
@@ -349,7 +348,6 @@ await transaction(async (connection) => {
       "Vivid red",
       "Rough",
       640000,
-      1250000,
       "IN_CUTTING",
       cuttingHouse,
       cutter,
@@ -368,7 +366,6 @@ await transaction(async (connection) => {
       "Hot pink",
       "Cushion",
       310000,
-      780000,
       "RESERVED",
       showroom,
       staff,
@@ -387,7 +384,6 @@ await transaction(async (connection) => {
       "Golden yellow",
       "Cushion",
       720000,
-      0,
       "SOLD",
       clientCustody,
       blueCrown,
@@ -406,7 +402,6 @@ await transaction(async (connection) => {
       "Greenish yellow",
       "Oval",
       420000,
-      920000,
       "IN_TREATMENT",
       lab,
       laboratory,
@@ -425,7 +420,6 @@ await transaction(async (connection) => {
       "Cornflower blue",
       "Emerald",
       1450000,
-      2600000,
       "ON_HOLD",
       trayB,
       staff,
@@ -444,7 +438,6 @@ await transaction(async (connection) => {
       "Pigeon blood red",
       "Round",
       485000,
-      980000,
       "AVAILABLE",
       trayA,
       staff,
@@ -463,7 +456,6 @@ await transaction(async (connection) => {
       "Rose pink",
       "Oval",
       530000,
-      1180000,
       "AVAILABLE",
       showroom,
       staff,
@@ -482,7 +474,6 @@ await transaction(async (connection) => {
       "Deep blue",
       "Cushion",
       1900000,
-      0,
       "SOLD",
       clientCustody,
       ishara,
@@ -498,9 +489,9 @@ await transaction(async (connection) => {
     await connection.execute(
       `INSERT INTO stones
        (id, product_id, qr_token, gem_type, origin, current_weight, intake_weight, color, shape,
-        purchase_cost, asking_price, status, location_id, custodian_contact_id,
+        purchase_cost, status, location_id, custodian_contact_id,
         treatment_disclosure, certificate_reference, seller_id, acquired_on, notes)
-       VALUES (?, CONCAT('PRD-', UPPER(SUBSTRING(REPLACE(UUID(), '-', ''), 1, 12))), UUID(), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?, ?, ?, NULLIF(?, 'None'), ?, ?, ?)
+       VALUES (?, CONCAT('PRD-', UPPER(SUBSTRING(REPLACE(UUID(), '-', ''), 1, 12))), UUID(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, 'None'), ?, ?, ?)
        ON DUPLICATE KEY UPDATE seller_id = VALUES(seller_id)`,
       [...stone],
     );

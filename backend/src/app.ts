@@ -12,6 +12,7 @@ import { ledgerRouter } from "./modules/ledger/ledger.routes.js";
 import { commandsRouter } from "./modules/commands/commands.routes.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { requireAuth } from "./middleware/auth.js";
+import { jewelleryRouter } from "./modules/jewellery/jewellery.routes.js";
 
 export function createApp() {
   const app = express();
@@ -34,6 +35,7 @@ export function createApp() {
   app.use("/api/v1/auth", authRouter);
   app.use("/api/v1", requireAuth);
   app.use("/api/v1/stones", stonesRouter);
+  app.use("/api/v1/jewellery", jewelleryRouter);
   app.use("/api/v1/ledger", ledgerRouter);
   app.use("/api/v1/commands", commandsRouter);
   app.use("/api/v1", referenceRouter);

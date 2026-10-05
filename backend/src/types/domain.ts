@@ -3,6 +3,8 @@ export const stoneStatuses = [
   "RESERVED",
   "IN_CUTTING",
   "IN_TREATMENT",
+  "IN_JEWELLERY",
+  "JEWELLERY",
   "SOLD",
   "ON_HOLD",
 ] as const;
@@ -18,8 +20,8 @@ export type StoneRow = {
   intakeWeight: number;
   color: string | null;
   shape: string | null;
+  cutStyle: string | null;
   purchaseCost: number;
-  askingPrice: number | null;
   status: StoneStatus;
   locationId: number | null;
   custodianContactId: number | null;
@@ -31,4 +33,7 @@ export type StoneRow = {
   version: number;
   createdAt: Date;
   updatedAt: Date;
+  locationName?: string | null;
+  custodianName?: string | null;
+  sellerName?: string | null;
 };

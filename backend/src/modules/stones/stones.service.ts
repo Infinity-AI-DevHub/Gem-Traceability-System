@@ -1,6 +1,6 @@
 import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { transaction } from "../../database/pool.js";
-import { addEvent } from "../events/events.repository.js";
+import { addEvent, changedValues, stoneSnapshot } from "../events/events.repository.js";
 import { requireStone, updateStoneState } from "./stones.repository.js";
 import type { z } from "zod";
 import type {
@@ -12,6 +12,7 @@ import { HttpError } from "../../lib/http-error.js";
 import { randomUUID } from "node:crypto";
 
 type Intake = z.infer<typeof intakeStone>;
+type StoneConnection = Parameters<Parameters<typeof transaction>[0]>[0];
 
 async function resolveLocation(
   connection: Parameters<Parameters<typeof transaction>[0]>[0],
@@ -58,7 +59,21 @@ async function resolveSeller(
     "SELECT id FROM sellers WHERE name=? LIMIT 1",
     [input.sellerName],
   );
-  return Number(rows[0]?.id);
+  const sellerId = Number(rows[0]?.id);
+  for (const [index, image] of (input.sellerImages ?? []).entries()) {
+    const match = image.dataUrl.match(
+      /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/,
+    );
+    if (!match) throw new HttpError(422, "Unsupported seller image format");
+    const data = Buffer.from(match[2]!, "base64");
+    if (data.length > 2_000_000)
+      throw new HttpError(422, "Each seller image must be smaller than 2 MB");
+    await connection.execute(
+      "INSERT INTO seller_images (seller_id,image_data,mime_type,sort_order,captured) VALUES (?,?,?,?,?)",
+      [sellerId, data, match[1]!, index, image.captured],
+    );
+  }
+  return sellerId;
 }
 
 function gemCode(gemType: string) {
@@ -93,8 +108,11 @@ async function nextStoneId(
   return `GEM-${code}-${String(year).slice(-2)}-${String(number).padStart(4, "0")}`;
 }
 
-export async function receiveStone(input: Intake) {
-  return transaction(async (connection) => {
+async function createStone(
+  connection: StoneConnection,
+  input: Intake,
+  performedBy: string,
+) {
     const id = await nextStoneId(connection, input);
     const locationId = await resolveLocation(connection, input);
     const sellerId = await resolveSeller(connection, input);
@@ -131,23 +149,52 @@ export async function receiveStone(input: Intake) {
         throw new HttpError(409, `Stone ${id} already exists`);
       throw error;
     }
+    const created = await requireStone(id, connection);
+    for (const [index, image] of (input.images ?? []).entries()) {
+      const match = image.dataUrl.match(
+        /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/,
+      );
+      if (!match) throw new HttpError(422, "Unsupported stone image format");
+      const data = Buffer.from(match[2]!, "base64");
+      if (data.length > 2_000_000)
+        throw new HttpError(422, "Each stone image must be smaller than 2 MB");
+      await connection.execute(
+        "INSERT INTO stone_images (stone_id,image_data,mime_type,sort_order,captured) VALUES (?,?,?,?,?)",
+        [id, data, match[1]!, index, image.captured],
+      );
+    }
     await addEvent(connection, {
       stoneId: id,
       eventType: "INTAKE",
       title: "Stone received",
       details: {
-        origin: input.origin,
-        intakeWeight: input.weight,
-        purchaseCost: input.purchaseCost,
+        detail: "Permanent stone record created with its initial identity, custody and commercial values.",
+        performedBy,
+        values: stoneSnapshot(created),
+        imageCount: input.images?.length ?? 0,
       },
     });
-    return requireStone(id, connection);
+    return created;
+}
+
+export async function receiveStone(input: Intake, performedBy = "System") {
+  return transaction((connection) => createStone(connection, input, performedBy));
+}
+
+export async function receiveStones(inputs: Intake[], performedBy = "System") {
+  return transaction(async (connection) => {
+    const created = [];
+    for (const input of inputs) {
+      created.push(await createStone(connection, input, performedBy));
+    }
+    return created;
   });
 }
 
 export async function editStoneRecord(
   id: string,
   input: Intake & { expectedVersion: number },
+  performedBy = "System",
 ) {
   return transaction(async (connection) => {
     const stone = await requireStone(id, connection);
@@ -183,21 +230,29 @@ export async function editStoneRecord(
         409,
         "The stone changed since it was loaded. Refresh and try again.",
       );
+    const updated = await requireStone(id, connection);
+    const before = stoneSnapshot(stone);
+    const after = stoneSnapshot(updated);
     await addEvent(connection, {
       stoneId: id,
       eventType: "RECORD_UPDATE",
       title: "Stone details updated",
       details: {
-        detail: `Core intake details updated from version ${stone.version}.`,
+        detail: `Stone record updated from version ${stone.version} to ${updated.version}.`,
+        performedBy,
+        changes: changedValues(before, after),
+        before,
+        after,
       },
     });
-    return requireStone(id, connection);
+    return updated;
   });
 }
 
 export async function moveStone(
   id: string,
   input: z.infer<typeof transferCustody>,
+  performedBy = "System",
 ) {
   return transaction(async (connection) => {
     const stone = await requireStone(id, connection);
@@ -210,6 +265,9 @@ export async function moveStone(
       locationId: input.locationId,
       custodianContactId: input.custodianContactId,
     });
+    const updated = await requireStone(id, connection);
+    const before = stoneSnapshot(stone);
+    const after = stoneSnapshot(updated);
     await addEvent(connection, {
       stoneId: id,
       eventType: "CUSTODY_TRANSFER",
@@ -218,13 +276,17 @@ export async function moveStone(
         fromLocationId: stone.locationId,
         toLocationId: input.locationId,
         notes: input.notes ?? null,
+        performedBy,
+        changes: changedValues(before, after),
+        before,
+        after,
       },
     });
     return requireStone(id, connection);
   });
 }
 
-export async function holdStone(id: string, input: z.infer<typeof placeHold>) {
+export async function holdStone(id: string, input: z.infer<typeof placeHold>, performedBy = "System") {
   return transaction(async (connection) => {
     const stone = await requireStone(id, connection);
     if (stone.status !== "AVAILABLE")
@@ -232,11 +294,12 @@ export async function holdStone(id: string, input: z.infer<typeof placeHold>) {
     await updateStoneState(connection, id, input.expectedVersion, {
       status: "ON_HOLD",
     });
+    const updated = await requireStone(id, connection);
     await addEvent(connection, {
       stoneId: id,
       eventType: "HOLD_PLACED",
       title: "Stone placed on hold",
-      details: { reason: input.reason },
+      details: { detail: input.reason, reason: input.reason, performedBy, changes: changedValues(stoneSnapshot(stone), stoneSnapshot(updated)), before: stoneSnapshot(stone), after: stoneSnapshot(updated) },
     });
     return requireStone(id, connection);
   });
@@ -245,6 +308,7 @@ export async function holdStone(id: string, input: z.infer<typeof placeHold>) {
 export async function clearStoneHold(
   id: string,
   input: z.infer<typeof placeHold>,
+  performedBy = "System",
 ) {
   return transaction(async (connection) => {
     const stone = await requireStone(id, connection);
@@ -253,11 +317,12 @@ export async function clearStoneHold(
     await updateStoneState(connection, id, input.expectedVersion, {
       status: "AVAILABLE",
     });
+    const updated = await requireStone(id, connection);
     await addEvent(connection, {
       stoneId: id,
       eventType: "HOLD_CLEARED",
       title: "Hold cleared",
-      details: { reason: input.reason },
+      details: { detail: input.reason, reason: input.reason, performedBy, changes: changedValues(stoneSnapshot(stone), stoneSnapshot(updated)), before: stoneSnapshot(stone), after: stoneSnapshot(updated) },
     });
     return requireStone(id, connection);
   });

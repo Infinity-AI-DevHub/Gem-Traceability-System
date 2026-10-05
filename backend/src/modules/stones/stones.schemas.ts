@@ -13,6 +13,8 @@ export const listStonesQuery = z.object({
       "RESERVED",
       "IN_CUTTING",
       "IN_TREATMENT",
+      "IN_JEWELLERY",
+      "JEWELLERY",
       "SOLD",
       "ON_HOLD",
     ])
@@ -47,16 +49,44 @@ const stoneDetails = z.object({
     .optional()
     .nullable(),
   sellerLocality: z.string().trim().max(150).optional().nullable(),
+  sellerImages: z
+    .array(
+      z.object({
+        dataUrl: z
+          .string()
+          .max(3_000_000)
+          .regex(/^data:image\/(jpeg|png|webp);base64,/),
+        captured: z.boolean().default(false),
+      }),
+    )
+    .max(4)
+    .optional(),
   locationId: z.coerce.number().int().positive().optional(),
   locationName: z.string().trim().min(2).max(180).optional(),
   acquiredOn: z.iso.date(),
   notes: optionalText,
+  images: z
+    .array(
+      z.object({
+        dataUrl: z
+          .string()
+          .max(3_000_000)
+          .regex(/^data:image\/(jpeg|png|webp);base64,/),
+        captured: z.boolean().default(false),
+      }),
+    )
+    .max(4)
+    .optional(),
 });
 
 export const intakeStone = stoneDetails.refine(
   (value) => value.locationId || value.locationName,
   { message: "A receiving location is required" },
 );
+
+export const intakeStoneBatch = z.object({
+  stones: z.array(intakeStone).min(2).max(20),
+});
 
 export const editStone = stoneDetails
   .omit({ id: true })

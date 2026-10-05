@@ -11,7 +11,7 @@ Node.js and MySQL API for the Origin gemstone lifecycle application.
 5. Run `npm run db:migrate --workspace backend`.
 6. Run `npm run dev:backend`.
 
-The API listens on `http://127.0.0.1:4000` by default. Its health endpoint is
+The API listens on `http://127.0.0.1:4500` by default. Its health endpoint is
 `GET /api/v1/health`.
 
 ## Current API foundation

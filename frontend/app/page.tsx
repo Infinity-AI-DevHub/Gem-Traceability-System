@@ -1,7 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import QRCode from "react-qr-code";
 import { toast } from "sonner";
 import {
@@ -11,6 +12,7 @@ import {
   Camera,
   ClipboardCheck,
   Download,
+  Eye,
   Gem,
   History,
   ImagePlus,
@@ -19,10 +21,11 @@ import {
   Menu,
   Pencil,
   Plus,
-  QrCode,
+  Printer,
   Search,
   ShieldCheck,
   ShoppingBag,
+  Tags,
   TrendingUp,
   Truck,
   Trash2,
@@ -42,6 +45,7 @@ import {
   money,
   today,
   type Event,
+  type CategoryKey,
   type Ledger,
   type Stone,
 } from "./demo-data";
@@ -57,8 +61,11 @@ type Page =
   | "stocktake"
   | "quality"
   | "sales"
+  | "jewellery"
+  | "promotions"
   | "reports"
-  | "contacts";
+  | "contacts"
+  | "categories";
 type Operation =
   | "job"
   | "dispatch"
@@ -71,26 +78,49 @@ type Operation =
   | "payment"
   | "hold"
   | "clear-hold"
-  | "price"
   | "sales-handover"
   | "sales-return"
-  | "sales-complete";
+  | "sales-complete"
+  | "direct-sale"
+  | "jewellery-handover"
+  | "jewellery-receive"
+  | "jewellery-edit"
+  | "promotion-handover"
+  | "promotion-return";
 type PhotoDraft = {
   id?: number;
   dataUrl: string;
   captured: boolean;
+};
+const pageRoutes: Record<Exclude<Page, "stone">, string> = {
+  dashboard: "/dashboard",
+  inventory: "/stones",
+  intake: "/stones/new",
+  workshop: "/workshops",
+  custody: "/custody",
+  stocktake: "/stocktake",
+  quality: "/quality",
+  sales: "/salesman-trials",
+  jewellery: "/jewellery",
+  promotions: "/promotions",
+  reports: "/reports",
+  contacts: "/directory",
+  categories: "/categories",
 };
 const nav = [
   ["dashboard", "Command centre", LayoutDashboard],
   ["inventory", "Stone register", Gem],
   ["intake", "New intake", Plus],
   ["workshop", "Cutting & treatment", WandSparkles],
+  ["jewellery", "Jewellery", Gem],
+  ["promotions", "Promotions", TrendingUp],
   ["custody", "Custody & locations", Truck],
   ["stocktake", "Stocktake", ClipboardCheck],
   ["quality", "Quality & exceptions", ClipboardCheck],
   ["sales", "Salesman trials", ShoppingBag],
   ["reports", "Reports", TrendingUp],
   ["contacts", "Directory", Users],
+  ["categories", "Categories", Tags],
 ] as const;
 
 function Brand() {
@@ -212,18 +242,35 @@ function number(v: FormDataEntryValue | null) {
 function txt(v: FormDataEntryValue | null) {
   return String(v || "").trim();
 }
-export default function Home() {
+export default function Home({
+  initialPage = "dashboard",
+  initialStoneId = "",
+  initialJewelleryId = "",
+  initialEditing = "",
+  loginPage = false,
+  postLoginPath = "/dashboard",
+}: {
+  initialPage?: Page;
+  initialStoneId?: string;
+  initialJewelleryId?: string;
+  initialEditing?: string;
+  loginPage?: boolean;
+  postLoginPath?: string;
+}) {
+  const router = useRouter();
   const [loggedIn, setLoggedIn] = useState(false),
-    [page, setPage] = useState<Page>("dashboard"),
+    [authChecking, setAuthChecking] = useState(true),
+    [page, setPage] = useState<Page>(initialPage),
     [ledger, setLedger] = useState<Ledger>(emptyLedger),
-    [selected, setSelected] = useState(""),
+    [selected, setSelected] = useState(initialStoneId),
     [operation, setOperation] = useState<Operation | null>(null),
     [target, setTarget] = useState(""),
+    [stoneLocked, setStoneLocked] = useState(false),
     [notice, setNotice] = useState(""),
     [menu, setMenu] = useState(false),
     [search, setSearch] = useState(""),
     [counted, setCounted] = useState<string[]>([]),
-    [editing, setEditing] = useState<string | null>(null);
+    [editing, setEditing] = useState<string | null>(initialEditing || null);
   const stone =
     ledger.stones.find((s) => s.id === selected) || ledger.stones[0];
   const fail = (error: unknown, fallback: string) => {
@@ -240,12 +287,67 @@ export default function Home() {
       fail(error, "Could not load the database");
     }
   };
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        await api.session();
+        const data = await api.ledger();
+        if (!active) return;
+        setLedger(data);
+        const jewelleryStoneId = initialJewelleryId
+          ? data.jewelleryProfiles.find((profile) => profile.id === initialJewelleryId)?.stoneId
+          : "";
+        setSelected((current) => current || jewelleryStoneId || data.stones[0]?.id || "");
+        if (initialPage === "stone" && initialStoneId) {
+          const converted = data.jewelleryProfiles.find(
+            (profile) => profile.stoneId === initialStoneId,
+          );
+          if (converted) {
+            setPage("jewellery");
+            router.replace(`/jewellery/${encodeURIComponent(converted.id)}`);
+          }
+        }
+        setLoggedIn(true);
+        if (loginPage) router.replace(postLoginPath);
+      } catch {
+        if (!active) return;
+        setLoggedIn(false);
+        if (!loginPage) router.replace("/login");
+      } finally {
+        if (active) setAuthChecking(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [initialJewelleryId, initialPage, initialStoneId, loginPage, postLoginPath, router]);
+  useEffect(() => {
+    const unauthorized = () => {
+      setLoggedIn(false);
+      router.replace("/login");
+    };
+    window.addEventListener("origin:unauthorized", unauthorized);
+    return () =>
+      window.removeEventListener("origin:unauthorized", unauthorized);
+  }, [router]);
   const navigate = (p: Page, id?: string) => {
+    const jewellery = id
+      ? ledger.jewelleryProfiles.find((profile) => profile.stoneId === id)
+      : undefined;
+    const nextPage = p === "stone" && jewellery ? "jewellery" : p;
     if (id) setSelected(id);
-    setPage(p);
+    setPage(nextPage);
     setMenu(false);
     setSearch("");
     setEditing(null);
+    router.push(
+      nextPage === "jewellery" && id
+        ? `/jewellery/${encodeURIComponent(jewellery?.id ?? id)}`
+        : nextPage === "stone" && id
+          ? `/stones/${encodeURIComponent(id)}`
+          : pageRoutes[nextPage as Exclude<Page, "stone">],
+    );
   };
   const edit = (id: string) => {
     setSelected(id);
@@ -253,6 +355,7 @@ export default function Home() {
     setPage("intake");
     setMenu(false);
     setSearch("");
+    router.push(`/stones/${encodeURIComponent(id)}/edit`);
   };
   const open = (op: Operation, id?: string) => {
     const stoneId = id || stone?.id;
@@ -264,6 +367,7 @@ export default function Home() {
       return;
     }
     setTarget(stoneId);
+    setStoneLocked(page === "stone");
     setNotice("");
     setOperation(op);
   };
@@ -321,6 +425,9 @@ export default function Home() {
         sellerPhone: txt(form.get("newSellerPhone")) || null,
         sellerEmail: txt(form.get("newSellerEmail")) || null,
         sellerLocality: txt(form.get("newSellerLocality")) || null,
+        sellerImages: txt(form.get("sellerImages"))
+          ? JSON.parse(txt(form.get("sellerImages")))
+          : [],
         locationName: txt(form.get("location")) || "Main vault · Intake",
         acquiredOn: txt(form.get("date")) || today(),
         notes: txt(form.get("notes")),
@@ -355,6 +462,18 @@ export default function Home() {
       fail(error, "Intake failed");
     }
   };
+  const saveStoneBatch = async (
+    stones: Array<Record<string, unknown>>,
+  ) => {
+    try {
+      const result = await api.batchIntake(stones);
+      await refresh();
+      navigate("inventory");
+      flash(`${result.count} stones registered together in MySQL.`);
+    } catch (error) {
+      fail(error, "Batch intake failed");
+    }
+  };
   const stocktake = (id: string, missing: boolean) => {
     const current = ledger.stones.find((s) => s.id === id);
     void api
@@ -373,6 +492,13 @@ export default function Home() {
       })
       .catch((error) => fail(error, "Stocktake failed"));
   };
+  if (authChecking)
+    return (
+      <main className="auth-loading" aria-label="Checking secure session">
+        <Brand />
+        <span>Opening secure workspace…</span>
+      </main>
+    );
   if (!loggedIn)
     return (
       <Login
@@ -383,6 +509,8 @@ export default function Home() {
             await refresh();
             setNotice("");
             setLoggedIn(true);
+            setPage("dashboard");
+            router.replace(postLoginPath);
             toast.success("Welcome back. The workspace is ready.");
           } catch (error) {
             fail(error, "Sign in failed");
@@ -395,6 +523,7 @@ export default function Home() {
       await api.logout();
       setLedger(emptyLedger);
       setLoggedIn(false);
+      router.replace("/login");
       toast.success("Signed out safely.");
     } catch (error) {
       fail(error, "Sign out failed");
@@ -510,8 +639,11 @@ export default function Home() {
             <Intake
               key={editing ?? "new-stone"}
               saveStone={saveStone}
+              saveStoneBatch={saveStoneBatch}
               navigate={navigate}
               sellers={ledger.sellers}
+              categories={ledger.categories}
+              refresh={refresh}
               stone={
                 editing
                   ? ledger.stones.find((item) => item.id === editing)
@@ -533,10 +665,21 @@ export default function Home() {
             <Quality ledger={ledger} actions={actions} />
           ) : page === "sales" ? (
             <Sales ledger={ledger} actions={actions} />
+          ) : page === "jewellery" ? (
+            <Jewellery
+              ledger={ledger}
+              stone={stone}
+              actions={actions}
+              refresh={refresh}
+            />
+          ) : page === "promotions" ? (
+            <Promotions ledger={ledger} actions={actions} />
           ) : page === "reports" ? (
             <Reports ledger={ledger} actions={actions} />
+          ) : page === "categories" ? (
+            <Categories ledger={ledger} refresh={refresh} />
           ) : (
-            <Directory ledger={ledger} />
+            <Directory ledger={ledger} refresh={refresh} />
           )}
         </div>
       </main>
@@ -548,12 +691,14 @@ export default function Home() {
       {stone && (
         <OperationDialog
           operation={operation}
+          stoneLocked={stoneLocked}
           close={() => {
             setOperation(null);
             setNotice("");
           }}
           stone={ledger.stones.find((s) => s.id === target) || stone}
           ledger={ledger}
+          refresh={refresh}
           submit={submitOperation}
           error={operation ? notice : ""}
         />
@@ -693,15 +838,26 @@ function StoneLink({
   stone: Stone;
   navigate: Actions["navigate"];
 }) {
+  const image = stone.images[0];
   return (
     <button
       className="ops-stone-link"
       onClick={() => navigate("stone", stone.id)}
     >
       <span
-        className={`gem-swatch ${stone.type.toLowerCase().replaceAll(" ", "-")}`}
+        className={`gem-swatch ${image ? "has-image" : stone.type.toLowerCase().replaceAll(" ", "-")}`}
       >
-        <Gem size={23} />
+        {image ? (
+          <Image
+            unoptimized
+            width={120}
+            height={120}
+            src={image.url}
+            alt={`${stone.type} thumbnail`}
+          />
+        ) : (
+          <Gem size={23} />
+        )}
       </span>
       <span>
         <strong>{stone.type}</strong>
@@ -716,9 +872,136 @@ function StoneLink({
 function Dashboard({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
   const active = ledger.stones.filter((s) => s.status !== "Sold"),
     openJobs = ledger.jobs.filter((j) => j.status !== "Returned"),
+    activeJewellery = ledger.jewelleryJobs.filter(
+      (job) => job.status === "With workshop",
+    ),
+    activePromotions = ledger.promotionHandovers.filter(
+      (handover) => handover.status === "With company",
+    ),
+    activeSalesmanHandovers = ledger.salesmanHandovers.filter(
+      (handover) => handover.status === "With salesman",
+    ),
     salesmanRevenue = ledger.salesmanHandovers
       .filter((handover) => handover.status === "Sold")
-      .reduce((total, handover) => total + handover.finalPrice, 0);
+      .reduce((total, handover) => total + handover.finalPrice, 0),
+    directRevenue = ledger.directSales.reduce(
+      (total, sale) => total + sale.finalPrice,
+      0,
+    );
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const dueDays = (date: string) =>
+    Math.round(
+      (new Date(`${date}T00:00:00`).getTime() - startOfToday.getTime()) /
+        86_400_000,
+    );
+  const dueLabel = (days: number) =>
+    days < 0
+      ? `${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} overdue`
+      : days === 0
+        ? "Due today"
+        : days === 1
+          ? "Due tomorrow"
+          : days === 2
+            ? "Due in 2 days"
+            : `Due in ${days} days`;
+  type DueItem = {
+    id: string;
+    stoneId: string;
+    title: string;
+    owner: string;
+    kind: "workshop" | "jewellery" | "promotion" | "salesman";
+    due: string;
+    days: number;
+    action: string;
+    run: () => void;
+  };
+  const dueItems: DueItem[] = [
+    ...openJobs
+      .filter((job) => Boolean(job.due))
+      .map((job) => ({
+        id: job.id,
+        stoneId: job.stoneId,
+        title: `${job.kind} · ${job.id}`,
+        owner: `${job.workshop} · ${job.provider}`,
+        kind: "workshop" as const,
+        due: job.due,
+        days: dueDays(job.due),
+        action: job.status === "Pending dispatch" ? "Dispatch" : "Receive",
+        run: () =>
+          actions.open(
+            job.status === "Pending dispatch" ? "dispatch" : "return",
+            job.stoneId,
+          ),
+      })),
+    ...activeJewellery.map((job) => ({
+      id: job.id,
+      stoneId: job.stoneId,
+      title: `Jewellery · ${job.id}`,
+      owner: job.workshop,
+      kind: "jewellery" as const,
+      due: job.deadline,
+      days: dueDays(job.deadline),
+      action: "Receive",
+      run: () => actions.open("jewellery-receive", job.stoneId),
+    })),
+    ...activePromotions.map((handover) => ({
+      id: handover.id,
+      stoneId: handover.stoneId,
+      title: `Promotion · ${handover.company}`,
+      owner: "Promotion company",
+      kind: "promotion" as const,
+      due: handover.deadline,
+      days: dueDays(handover.deadline),
+      action: "Receive",
+      run: () => actions.open("promotion-return", handover.stoneId),
+    })),
+    ...activeSalesmanHandovers.map((handover) => ({
+      id: handover.id,
+      stoneId: handover.stoneId,
+      title: `Sales trial · ${handover.salesman}`,
+      owner: `${money(handover.quotedPrice)} quoted`,
+      kind: "salesman" as const,
+      due: handover.deadline,
+      days: dueDays(handover.deadline),
+      action: "Review",
+      run: () => actions.navigate("sales"),
+    })),
+  ].sort((a, b) => a.days - b.days);
+  const priorityItems = dueItems.filter((item) => item.days <= 2);
+  const overdueItems = priorityItems.filter((item) => item.days < 0);
+  const heldStones = ledger.stones.filter((stone) => stone.status === "On Hold");
+  const ongoingCount =
+    openJobs.length +
+    activeJewellery.length +
+    activePromotions.length +
+    activeSalesmanHandovers.length;
+  const completedJobCost = ledger.jobs
+    .filter((job) => job.status === "Returned")
+    .reduce((total, job) => total + job.cost, 0);
+  const soldRecords = [
+    ...ledger.salesmanHandovers
+      .filter((handover) => handover.status === "Sold")
+      .map((handover) => ({
+        stoneId: handover.stoneId,
+        value: handover.finalPrice,
+      })),
+    ...ledger.directSales.map((sale) => ({
+      stoneId: sale.stoneId,
+      value: sale.finalPrice,
+    })),
+  ];
+  const soldCost = soldRecords.reduce(
+    (total, sale) =>
+      total +
+      (ledger.stones.find((stone) => stone.id === sale.stoneId)?.purchase ?? 0) +
+      ledger.jobs
+        .filter(
+          (job) => job.stoneId === sale.stoneId && job.status === "Returned",
+        )
+        .reduce((jobTotal, job) => jobTotal + job.cost, 0),
+    0,
+  );
   return (
     <>
       <Heading
@@ -730,92 +1013,153 @@ function Dashboard({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
       />
       <div className="ops-metrics">
         <div className="metric accent">
-          <span>Stones in custody</span>
+          <span>Active inventory</span>
           <strong>{active.length}</strong>
           <small>
             {active.reduce((n, s) => n + s.weight, 0).toFixed(2)} total carats
           </small>
         </div>
         <div className="metric">
-          <span>Active workshop jobs</span>
-          <strong>{openJobs.length}</strong>
+          <span>Ongoing operations</span>
+          <strong>{ongoingCount}</strong>
+          <small>Across workshops, sales, jewellery and promotions</small>
+        </div>
+        <div className={`metric ${priorityItems.length ? "warning" : ""}`}>
+          <span>Needs attention</span>
+          <strong>{priorityItems.length + heldStones.length}</strong>
           <small>
-            {openJobs.filter((j) => j.status === "With provider").length} with
-            external providers
+            {overdueItems.length} overdue · {priorityItems.length - overdueItems.length} due soon · {heldStones.length} on hold
           </small>
         </div>
         <div className="metric">
-          <span>With salesmen / held</span>
-          <strong>
-            {
-              ledger.stones.filter((s) =>
-                ["With Salesman", "On Hold"].includes(s.status),
-              ).length
-            }
-          </strong>
-          <small>Not available for sale</small>
-        </div>
-        <div className="metric">
-          <span>Salesman sales</span>
-          <strong>{money(salesmanRevenue)}</strong>
+          <span>Recorded sales</span>
+          <strong>{money(salesmanRevenue + directRevenue)}</strong>
           <small>Final recorded selling prices</small>
         </div>
       </div>
-      <div className="ops-two">
+      {(priorityItems.length > 0 || heldStones.length > 0) && (
         <Panel
-          title="Today’s work queue"
-          sub="Resolve the next operational handoffs"
+          title="Attention needed"
+          sub="Shown from two days before a deadline, with overdue work first"
+          aside={
+            <span className="dashboard-alert-count">
+              <AlertTriangle size={15} /> {priorityItems.length + heldStones.length}
+            </span>
+          }
         >
-          <div className="ops-queue">
-            {openJobs.map((job) => {
-              const stone = ledger.stones.find((s) => s.id === job.stoneId)!;
+          <div className="dashboard-priority-list">
+            {priorityItems.map((item) => {
+              const source = ledger.stones.find(
+                (stone) => stone.id === item.stoneId,
+              );
               return (
-                <div className="ops-queue-row" key={job.id}>
+                <article
+                  className={`dashboard-priority ${item.days < 0 ? "is-overdue" : "is-due"}`}
+                  key={`${item.kind}-${item.id}`}
+                >
+                  <span className="dashboard-priority-icon">
+                    <AlertTriangle size={18} />
+                  </span>
                   <div>
-                    <strong>
-                      {job.id} · {stone.type}
-                    </strong>
+                    <strong>{item.title}</strong>
                     <small>
-                      {job.status} · handed over {job.handoverDate} · due{" "}
-                      {job.due}
+                      {source?.type ?? item.stoneId} · {item.stoneId} · {item.owner}
                     </small>
                   </div>
-                  <button
-                    onClick={() =>
-                      actions.open(
-                        job.status === "Pending dispatch"
-                          ? "dispatch"
-                          : "return",
-                        job.stoneId,
-                      )
-                    }
-                  >
-                    {job.status === "Pending dispatch" ? "Dispatch" : "Receive"}{" "}
-                    <ArrowRight size={14} />
+                  <span className="dashboard-due-copy">
+                    <strong>{dueLabel(item.days)}</strong>
+                    <small>{item.due}</small>
+                  </span>
+                  <button type="button" onClick={item.run}>
+                    {item.action} <ArrowRight size={14} />
                   </button>
-                </div>
+                </article>
               );
             })}
-            {!openJobs.length && <p className="ops-empty">No open jobs.</p>}
-            <div className="ops-queue-row">
-              <div>
-                <strong>Salesman handovers</strong>
-                <small>
-                  {
-                    ledger.salesmanHandovers.filter(
-                      (handover) => handover.status === "With salesman",
-                    ).length
-                  }{" "}
-                  awaiting sale or return
-                </small>
-              </div>
-              <button onClick={() => actions.navigate("sales")}>
-                Review <ArrowRight size={14} />
-              </button>
-            </div>
+            {heldStones.map((held) => (
+              <article className="dashboard-priority is-held" key={held.id}>
+                <span className="dashboard-priority-icon">
+                  <ShieldCheck size={18} />
+                </span>
+                <div>
+                  <strong>Quality hold · {held.type}</strong>
+                  <small>
+                    {held.productId} · {held.id} · unavailable for operations
+                  </small>
+                </div>
+                <span className="dashboard-due-copy">
+                  <strong>Review required</strong>
+                  <small>{held.location}</small>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => actions.navigate("quality")}
+                >
+                  Review <ArrowRight size={14} />
+                </button>
+              </article>
+            ))}
           </div>
         </Panel>
-        <Panel title="Quick operations" sub="Common actions from the floor">
+      )}
+      <div className="ops-two">
+        <Panel
+          title="Ongoing operations"
+          sub={`${ongoingCount} item${ongoingCount === 1 ? "" : "s"} currently outside normal available stock`}
+        >
+          <div className="dashboard-operation-groups">
+            {[
+              ["Cutting & treatment", openJobs.length, "workshop" as Page],
+              ["Jewellery production", activeJewellery.length, "jewellery" as Page],
+              ["Promotion handovers", activePromotions.length, "promotions" as Page],
+              ["Salesman trials", activeSalesmanHandovers.length, "sales" as Page],
+            ].map(([label, count, destination]) => (
+              <button
+                className="dashboard-operation-card"
+                key={String(label)}
+                onClick={() => actions.navigate(destination as Page)}
+              >
+                <span>{label}</span>
+                <strong>{count}</strong>
+                <small>
+                  {Number(count) ? "Open register" : "Nothing outstanding"}
+                  <ArrowRight size={14} />
+                </small>
+              </button>
+            ))}
+          </div>
+        </Panel>
+        <Panel title="Expected back" sub="Upcoming returns, ordered by deadline">
+          <div className="dashboard-expected-list">
+            {dueItems.slice(0, 5).map((item) => (
+              <button key={`${item.kind}-${item.id}`} onClick={item.run}>
+                <span className={`dashboard-kind kind-${item.kind}`}>
+                  {item.kind === "workshop"
+                    ? "Workshop"
+                    : item.kind === "jewellery"
+                      ? "Jewellery"
+                      : item.kind === "promotion"
+                        ? "Promotion"
+                        : "Sales trial"}
+                </span>
+                <span>
+                  <strong>{item.title}</strong>
+                  <small>{item.stoneId} · {item.owner}</small>
+                </span>
+                <span className={item.days < 0 ? "is-late" : ""}>
+                  <strong>{dueLabel(item.days)}</strong>
+                  <small>{item.due}</small>
+                </span>
+              </button>
+            ))}
+            {!dueItems.length && (
+              <p className="ops-empty">Nothing is currently due back.</p>
+            )}
+          </div>
+        </Panel>
+      </div>
+      <div className="ops-two dashboard-lower-grid">
+        <Panel title="Quick operations" sub="Start common work without searching">
           <div className="ops-action-grid">
             <Action
               onClick={() => actions.navigate("intake")}
@@ -841,7 +1185,62 @@ function Dashboard({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
             >
               Quality review
             </Action>
+            <Action
+              onClick={() => actions.navigate("jewellery")}
+              sub="Create or receive pieces"
+            >
+              Jewellery work
+            </Action>
+            <Action
+              onClick={() => actions.navigate("sales")}
+              sub="Handover, return or sale"
+            >
+              Salesman trial
+            </Action>
+            <Action
+              onClick={() => actions.navigate("promotions")}
+              sub="Company handovers"
+            >
+              Promotions
+            </Action>
+            <Action
+              onClick={() => actions.navigate("stocktake")}
+              sub="Verify physical inventory"
+            >
+              Run stocktake
+            </Action>
           </div>
+        </Panel>
+        <Panel title="Financial snapshot" sub="Live values from completed records">
+          <div className="dashboard-finance-grid">
+            <div>
+              <span>Active stock cost</span>
+              <strong>
+                {money(active.reduce((total, stone) => total + stone.purchase, 0))}
+              </strong>
+            </div>
+            <div>
+              <span>Completed workshop cost</span>
+              <strong>{money(completedJobCost)}</strong>
+            </div>
+            <div>
+              <span>Recorded sales</span>
+              <strong>{money(salesmanRevenue + directRevenue)}</strong>
+            </div>
+            <div className="accent-value">
+              <span>Gross result</span>
+              <strong>
+                {money(salesmanRevenue + directRevenue - soldCost)}
+              </strong>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="dashboard-report-link"
+            onClick={() => actions.navigate("reports")}
+          >
+            Open full commercial report <ArrowRight size={15} />
+          </button>
         </Panel>
       </div>
       <Panel
@@ -996,7 +1395,6 @@ function Inventory({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                   "Location",
                   "Custodian",
                   "Purchase LKR",
-                  "Asking LKR",
                 ],
                 shown.map((s) => [
                   s.productId,
@@ -1008,7 +1406,6 @@ function Inventory({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                   s.location,
                   s.custodian,
                   s.purchase,
-                  s.asking,
                 ]),
               )
             }
@@ -1030,7 +1427,6 @@ function Inventory({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                 <th>Weight</th>
                 <th>Location / custodian</th>
                 <th>Status</th>
-                <th>Asking</th>
               </tr>
             </thead>
             <tbody>
@@ -1048,7 +1444,6 @@ function Inventory({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                   <td>
                     <Badge value={s.status} />
                   </td>
-                  <td>{s.asking ? money(s.asking) : "Not listed"}</td>
                 </tr>
               ))}
             </tbody>
@@ -1060,6 +1455,165 @@ function Inventory({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
       </Panel>
     </>
   );
+}
+
+function auditLabel(value: string) {
+  const labels: Record<string, string> = {
+    submittedValues: "Information entered",
+    stoneChanges: "What changed",
+    changes: "What changed",
+    values: "Stone details recorded",
+    before: "Before this action",
+    after: "After this action",
+    uploaded: "Images added",
+    imageCount: "Number of images",
+    productId: "Product ID",
+    gemType: "Gem type",
+    currentWeight: "Current weight",
+    intakeWeight: "Intake weight",
+    cutStyle: "Cut",
+    purchaseCost: "Purchase cost",
+    treatmentDisclosure: "Treatment",
+    certificateReference: "Certificate reference",
+    acquiredOn: "Purchase date",
+    metalType: "Metal",
+    metalPurity: "Purity / karats",
+    handedOverAt: "Handed over on",
+    finalPrice: "Final selling price",
+    workshopId: "Workshop record",
+    providerId: "Provider record",
+    sellerId: "Supplier record",
+    stoneId: "Stone ID",
+    mimeType: "Image format",
+  };
+  if (labels[value]) return labels[value];
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replaceAll("_", " ")
+    .replace(/^./, (character) => character.toUpperCase());
+}
+
+function auditValue(value: unknown, key = ""): string {
+  if (value === null || value === undefined || value === "") return "Not recorded";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") {
+    if (/weight/i.test(key)) return `${value.toLocaleString("en-LK")} ${/metal|total/i.test(key) ? "g" : "ct"}`;
+    if (/cost|price|asking|payment|amount/i.test(key)) return money(value);
+    return value.toLocaleString("en-LK");
+  }
+  if (typeof value === "string" && /^[A-Z][A-Z_]+$/.test(value))
+    return value.toLowerCase().replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
+  if (typeof value === "object") return "Recorded details";
+  return String(value);
+}
+
+function AuditValueRows({ value }: { value: unknown }) {
+  if (Array.isArray(value)) {
+    return (
+      <div className="audit-item-list">
+        {value.map((item, index) => (
+          <div className="audit-list-item" key={index}>
+            <b>{value.length === 1 ? "Image" : `Item ${index + 1}`}</b>
+            <AuditValueRows value={item} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (value && typeof value === "object") {
+    return (
+      <div className="audit-value-grid">
+        {Object.entries(value as Record<string, unknown>)
+          .filter(([key]) => key !== "askingPrice")
+          .map(([key, item]) => {
+          const change = item && typeof item === "object" && !Array.isArray(item)
+            ? item as Record<string, unknown>
+            : null;
+          return (
+            <div key={key}>
+              <span>{auditLabel(key)}</span>
+              {change && "from" in change && "to" in change ? (
+                <strong className="audit-change"><del>{auditValue(change.from, key)}</del><i>to</i>{auditValue(change.to, key)}</strong>
+              ) : Array.isArray(item) || (item && typeof item === "object") ? (
+                <AuditValueRows value={item} />
+              ) : (
+                <strong>{auditValue(item, key)}</strong>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+  return <strong>{auditValue(value)}</strong>;
+}
+
+function AuditDetails({ details }: { details: Record<string, unknown> }) {
+  const groups = Object.entries(details).filter(
+    ([key]) => !["detail", "performedBy"].includes(key),
+  );
+  if (!groups.length) return null;
+  return (
+    <details className="audit-details">
+      <summary>Show details</summary>
+      <div className="audit-groups">
+        {groups.map(([groupName, groupValue]) => {
+          return (
+            <section key={groupName}>
+              <h4>{auditLabel(groupName)}</h4>
+              <AuditValueRows value={groupValue} />
+            </section>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
+function lifecycleLabel(value: string) {
+  const labels: Record<string, string> = {
+    INTAKE: "Stone received",
+    RECORD_UPDATE: "Details updated",
+    IMAGE_UPLOAD: "Images added",
+    IMAGE_REMOVAL: "Image removed",
+    JEWELLERY_IMAGE_UPLOAD: "Jewellery images added",
+    JEWELLERY_IMAGE_REMOVAL: "Jewellery image removed",
+    CUSTODY: "Custody update",
+    QUALITY: "Quality check",
+    JOB: "Workshop job",
+    DISPATCH: "Sent to workshop",
+    RETURN: "Received from workshop",
+    SALES_HANDOVER: "Given to salesman",
+    SALES_RETURN: "Received from salesman",
+    SALES_COMPLETE: "Sold by salesman",
+    DIRECT_SALE: "Direct sale",
+    JEWELLERY_HANDOVER: "Sent for jewellery",
+    JEWELLERY_RECEIVE: "Jewellery received",
+    JEWELLERY_EDIT: "Jewellery updated",
+    PROMOTION_HANDOVER: "Given for promotion",
+    PROMOTION_RETURN: "Received from promotion",
+    HOLD: "Placed on hold",
+    CLEAR_HOLD: "Hold removed",
+    STOCKTAKE: "Stock verified",
+    PRICE: "Price updated",
+    PAYMENT: "Payment received",
+  };
+  return labels[value] ?? auditLabel(value.toLowerCase());
+}
+
+function lifecycleSummary(event: Event) {
+  const summaries: Record<string, string> = {
+    INTAKE: "The stone was added with its starting details, source and purchase information.",
+    RECORD_UPDATE: "The stone details were updated.",
+    IMAGE_UPLOAD: "New photos were added to this stone.",
+    IMAGE_REMOVAL: "A photo was removed from this stone.",
+    JEWELLERY_IMAGE_UPLOAD: "New jewellery photos were added.",
+    JEWELLERY_IMAGE_REMOVAL: "A jewellery photo was removed.",
+    CUSTODY: "The location or person responsible for this stone changed.",
+    QUALITY: "A quality or treatment check was recorded.",
+    STOCKTAKE: "The stone was physically checked during stocktake.",
+  };
+  return summaries[event.category] ?? event.detail;
 }
 
 function StoneDetail({
@@ -1076,11 +1630,41 @@ function StoneDetail({
     salesmanHandovers = ledger.salesmanHandovers.filter(
       (handover) => handover.stoneId === stone.id,
     ),
+    directSales = ledger.directSales.filter(
+      (sale) => sale.stoneId === stone.id,
+    ),
     cost =
       stone.purchase +
       jobs
         .filter((j) => j.status === "Returned")
         .reduce((n, j) => n + j.cost, 0);
+  const qrSvg = () =>
+    document.getElementById(`stone-qr-${stone.id}`)?.querySelector("svg");
+  const downloadQr = () => {
+    const svg = qrSvg();
+    if (!svg) return;
+    const content = new XMLSerializer().serializeToString(svg);
+    const url = URL.createObjectURL(
+      new Blob([content], { type: "image/svg+xml;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${stone.productId}-QR.svg`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const printQr = () => {
+    const svg = qrSvg();
+    if (!svg) return;
+    const printWindow = window.open("", "_blank", "width=520,height=650");
+    if (!printWindow) {
+      toast.error("Allow pop-ups to print the QR code.");
+      return;
+    }
+    const qr = new XMLSerializer().serializeToString(svg);
+    printWindow.document.write(`<!doctype html><html><head><title>${stone.productId} QR</title><style>@page{margin:18mm}body{font-family:Arial,sans-serif;display:grid;place-items:center;text-align:center;margin:0}.label{padding:24px}.qr{width:280px;height:280px;margin:auto}h1{font-size:20px;margin:18px 0 5px}p{font-size:13px;margin:0;color:#475569}</style></head><body><div class="label"><div class="qr">${qr}</div><h1>${stone.productId}</h1><p>${stone.id} · ${stone.type}</p></div><script>window.onload=()=>{window.print();window.onafterprint=()=>window.close()}<\/script></body></html>`);
+    printWindow.document.close();
+  };
   return (
     <>
       <button
@@ -1121,9 +1705,6 @@ function StoneDetail({
             onClick={() => actions.edit(stone.id)}
           >
             <Pencil size={17} /> Edit details
-          </button>
-          <button className="ops-secondary" onClick={() => window.print()}>
-            <QrCode size={17} /> Print record
           </button>
         </div>
       </div>
@@ -1174,8 +1755,8 @@ function StoneDetail({
             </Panel>
           )}
           <Panel
-            title="Chain of custody & lifecycle"
-            sub={`${events.length} permanent lifecycle entries`}
+            title="Stone history"
+            sub={`${events.length} permanent ${events.length === 1 ? "entry" : "entries"} · a complete record of actions, custody and changes`}
           >
             {events.map((e) => (
               <div className="ops-timeline-row" key={e.id}>
@@ -1185,9 +1766,10 @@ function StoneDetail({
                 <div>
                   <div>
                     <strong>{e.title}</strong>
-                    <Badge value={e.category} />
+                    <span className="audit-kind">{lifecycleLabel(e.category)}</span>
                   </div>
-                  <p>{e.detail}</p>
+                  <p>{lifecycleSummary(e)}</p>
+                  <AuditDetails details={e.details} />
                   <small>
                     {e.at} · {e.actor}
                   </small>
@@ -1230,9 +1812,22 @@ function StoneDetail({
                   </span>
                 </div>
               ))}
-              {jobs.length + salesmanHandovers.length === 0 && (
-                <p>No jobs or transactions yet.</p>
-              )}
+              {directSales.map((sale) => (
+                <div key={sale.id}>
+                  <span>
+                    <strong>{sale.id} · Direct sale</strong>
+                    <small>
+                      {sale.buyer} ·{" "}
+                      {sale.buyerPhone ||
+                        sale.buyerEmail ||
+                        "Contact details not supplied"}
+                    </small>
+                  </span>
+                  <span>{money(sale.finalPrice)}</span>
+                </div>
+              ))}
+              {jobs.length + salesmanHandovers.length + directSales.length ===
+                0 && <p>No jobs or transactions yet.</p>}
             </div>
           </Panel>
         </div>
@@ -1243,6 +1838,7 @@ function StoneDetail({
           >
             <div className="qr-identity">
               <div
+                id={`stone-qr-${stone.id}`}
                 className="qr-code"
                 aria-label={`QR code for ${stone.productId}`}
               >
@@ -1261,6 +1857,14 @@ function StoneDetail({
               <strong>{stone.productId}</strong>
               <span>{stone.id}</span>
               <small>Scan to identify this exact stone record.</small>
+              <div className="qr-actions">
+                <button type="button" className="ops-secondary" onClick={downloadQr}>
+                  <Download size={16} /> Download QR
+                </button>
+                <button type="button" className="ops-secondary" onClick={printQr}>
+                  <Printer size={16} /> Print QR
+                </button>
+              </div>
             </div>
           </Panel>
           <Panel title="Current custody">
@@ -1279,12 +1883,6 @@ function StoneDetail({
               <strong>{money(stone.purchase)}</strong>
               <span>COMPLETED JOB COST</span>
               <strong>{money(cost - stone.purchase)}</strong>
-              <span>ASKING PRICE</span>
-              <strong>
-                {stone.asking ? money(stone.asking) : "Not listed"}
-              </strong>
-              <span>INDICATIVE MARGIN</span>
-              <strong>{stone.asking ? money(stone.asking - cost) : "—"}</strong>
             </div>
           </Panel>
           <Panel title="Available operations">
@@ -1299,11 +1897,8 @@ function StoneDetail({
                   >
                     Hand to salesman
                   </Action>
-                  <Action onClick={() => actions.open("sale", stone.id)}>
-                    Complete sale
-                  </Action>
-                  <Action onClick={() => actions.open("price", stone.id)}>
-                    Set asking price
+                  <Action onClick={() => actions.open("direct-sale", stone.id)}>
+                    Record direct sale
                   </Action>
                   <Action onClick={() => actions.open("hold", stone.id)}>
                     Place on hold
@@ -1334,21 +1929,6 @@ function StoneDetail({
                   Review active job
                 </Action>
               )}
-              {stone.status !== "Sold" && (
-                <Action
-                  onClick={() => actions.open("custody", stone.id)}
-                  disabled={
-                    !!jobs.find(
-                      (j) => j.stoneId === stone.id && j.status !== "Returned",
-                    )
-                  }
-                >
-                  Transfer custody
-                </Action>
-              )}
-              <Action onClick={() => actions.open("quality", stone.id)}>
-                Record assessment
-              </Action>
             </div>
           </Panel>
         </aside>
@@ -1357,50 +1937,192 @@ function StoneDetail({
   );
 }
 
-const gemTypes = [
-  "Blue Sapphire",
-  "Yellow Sapphire",
-  "Padparadscha Sapphire",
-  "White Sapphire",
-  "Star Sapphire",
-  "Ruby",
-  "Pink Spinel",
-  "Red Spinel",
-  "Blue Spinel",
-  "Chrysoberyl",
-  "Cat's Eye Chrysoberyl",
-  "Alexandrite",
-  "Emerald",
-  "Aquamarine",
-  "Tourmaline",
-  "Garnet",
-  "Topaz",
-  "Zircon",
-  "Moonstone",
-  "Quartz",
-];
-const stoneShapes = [
-  "Rough",
-  "Round",
-  "Oval",
-  "Cushion",
-  "Emerald",
-  "Pear",
-  "Marquise",
-  "Princess",
-  "Asscher",
-  "Radiant",
-  "Heart",
-  "Trillion",
-  "Baguette",
-  "Kite",
-  "Shield",
-  "Hexagon",
-  "Octagon",
-  "Cabochon",
-  "Freeform",
-];
-const cutStyles = ["Rough", "Oval", "Cushion", "Emerald", "Round"];
+const categoryLabels: Record<CategoryKey, string> = {
+  GEM_TYPE: "Gem types",
+  SHAPE: "Shapes",
+  CUT: "Cut types",
+  COLOR: "Colours",
+  TREATMENT: "Treatments",
+  METAL: "Jewellery metals",
+  METAL_PURITY: "Metal purities",
+  PAYMENT_METHOD: "Payment methods",
+};
+
+type DetailOption = {
+  value: string;
+  label: string;
+  subtitle?: string;
+  details?: Array<[string, string]>;
+  images?: string[];
+};
+
+function DetailedSelect({
+  name,
+  options,
+  defaultValue = "",
+  value,
+  required = false,
+  disabled = false,
+  placeholder = "Select an item",
+  onValueChange,
+}: {
+  name?: string;
+  options: DetailOption[];
+  defaultValue?: string;
+  value?: string;
+  required?: boolean;
+  disabled?: boolean;
+  placeholder?: string;
+  onValueChange?: (value: string) => void;
+}) {
+  const [internalValue, setInternalValue] = useState(defaultValue);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const selectedValue = value ?? internalValue;
+  const selected = options.find((option) => option.value === selectedValue);
+  const change = (nextValue: string) => {
+    if (value === undefined) setInternalValue(nextValue);
+    onValueChange?.(nextValue);
+  };
+
+  return (
+    <div className="detailed-select">
+      <select
+        name={name}
+        value={selectedValue}
+        required={required}
+        disabled={disabled}
+        onChange={(event) => change(event.target.value)}
+      >
+        <option value="" disabled={required}>{placeholder}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="detail-preview-button"
+        aria-label={selected ? `View details for ${selected.label}` : "Select an item to view details"}
+        title={selected ? "View full details" : "Select an item first"}
+        disabled={!selected}
+        onClick={() => setPreviewOpen(true)}
+      >
+        <Eye size={18} />
+      </button>
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="detail-preview-dialog" overlayClassName="detail-preview-overlay" showCloseButton={false}>
+          <div className="detail-preview-header">
+            <div className="detail-preview-icon"><Eye size={21} /></div>
+            <DialogHeader>
+              <DialogDescription>{selected?.subtitle || "Full record details"}</DialogDescription>
+              <DialogTitle>{selected?.label ?? "Item details"}</DialogTitle>
+            </DialogHeader>
+            <button type="button" className="detail-preview-close" onClick={() => setPreviewOpen(false)} aria-label="Close details"><X size={20} /></button>
+          </div>
+          {!!selected?.images?.length && (
+            <section className="detail-preview-section">
+              <h3>Images</h3>
+              <div className="detail-preview-images">
+                {selected.images.map((source, index) => (
+                  <Image key={`${source.slice(0, 40)}-${index}`} src={source} alt={`${selected.label} image ${index + 1}`} width={240} height={240} unoptimized />
+                ))}
+              </div>
+            </section>
+          )}
+          <section className="detail-preview-section">
+            <h3>Saved details</h3>
+            <div className="detail-preview-grid">
+              {(selected?.details ?? []).map(([label, detail]) => (
+                <div key={label}><span>{label}</span><strong>{detail || "Not recorded"}</strong></div>
+              ))}
+            </div>
+          </section>
+          <div className="detail-preview-footer"><button type="button" className="primary-button" onClick={() => setPreviewOpen(false)}>Done</button></div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function CategorySelect({
+  name,
+  categoryKey,
+  categories,
+  defaultValue = "",
+  required = false,
+  placeholder,
+  refresh,
+}: {
+  name: string;
+  categoryKey: CategoryKey;
+  categories: Ledger["categories"];
+  defaultValue?: string;
+  required?: boolean;
+  placeholder: string;
+  refresh: () => Promise<void>;
+}) {
+  const [value, setValue] = useState(defaultValue);
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const options = categories.filter((item) => item.categoryKey === categoryKey);
+  return (
+    <div className="category-control">
+      <div className="category-select-row">
+        <DetailedSelect
+          name={name}
+          value={value}
+          required={required}
+          placeholder={placeholder}
+          onValueChange={setValue}
+          options={options.map((item) => ({
+            value: item.name,
+            label: item.name,
+            subtitle: categoryLabels[categoryKey],
+            details: [["Category", categoryLabels[categoryKey]], ["Description", item.description]],
+          }))}
+        />
+        <button
+          type="button"
+          className="category-add-button"
+          aria-label={`Add ${categoryLabels[categoryKey]}`}
+          onClick={() => setAdding((current) => !current)}
+        >
+          <Plus size={17} />
+        </button>
+      </div>
+      {adding && (
+        <div className="category-inline-add">
+          <input
+            value={newName}
+            onChange={(event) => setNewName(event.target.value)}
+            placeholder={`New ${categoryLabels[categoryKey].toLowerCase().replace(/s$/, "")}`}
+            autoFocus
+          />
+          <button
+            type="button"
+            className="ops-secondary"
+            onClick={() => {
+              if (!newName.trim()) return;
+              void api
+                .addCategory({ categoryKey, name: newName.trim() })
+                .then(async (created) => {
+                  setValue(created.name);
+                  setNewName("");
+                  setAdding(false);
+                  await refresh();
+                  toast.success(`${created.name} added to ${categoryLabels[categoryKey].toLowerCase()}.`);
+                })
+                .catch((error) => toast.error(error instanceof Error ? error.message : "Category could not be added"));
+            }}
+          >
+            Add
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function editable(value: string) {
   return ["Not recorded", "None", "Not assigned"].includes(value) ? "" : value;
@@ -1439,17 +2161,101 @@ async function squarePhoto(file: File) {
   return canvas.toDataURL("image/jpeg", 0.84);
 }
 
+type BatchIntakeRow = { id: string };
+
+function BatchIntake({ sellers, categories, refresh, save, cancel }: {
+  sellers: Ledger["sellers"];
+  categories: Ledger["categories"];
+  refresh: () => Promise<void>;
+  save: (stones: Array<Record<string, unknown>>) => Promise<void>;
+  cancel: () => void;
+}) {
+  const newRow = (): BatchIntakeRow => ({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` });
+  const [rows, setRows] = useState<BatchIntakeRow[]>(() => [newRow(), newRow()]);
+  const [photos, setPhotos] = useState<Record<string, PhotoDraft[]>>({});
+  const [saving, setSaving] = useState(false);
+  const field = (name: string, row: BatchIntakeRow) => `${name}_${row.id}`;
+  const addImages = async (rowId: string, files: FileList | null, captured: boolean) => {
+    if (!files?.length) return;
+    const remaining = 4 - (photos[rowId]?.length ?? 0);
+    if (remaining <= 0) return toast.error("Each stone can have up to four images.");
+    try {
+      const prepared = await Promise.all(Array.from(files).slice(0, remaining).map(async (file) => ({ dataUrl: await squarePhoto(file), captured })));
+      setPhotos((all) => ({ ...all, [rowId]: [...(all[rowId] ?? []), ...prepared] }));
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Image could not be prepared"); }
+  };
+  const submit = async (form: FormData) => {
+    const stones = rows.map((row) => ({
+      gemType: txt(form.get(field("type", row))), origin: txt(form.get(field("origin", row))), weight: number(form.get(field("weight", row))),
+      color: txt(form.get(field("color", row))) || null, shape: txt(form.get(field("shape", row))) || null, cutStyle: txt(form.get(field("cut", row))) || null,
+      purchaseCost: number(form.get(field("purchase", row))), treatmentDisclosure: txt(form.get(field("treatment", row))) || "Not assessed",
+      certificateReference: txt(form.get(field("certificate", row))) || null, sellerId: number(form.get(field("seller", row))) || null,
+      locationName: txt(form.get(field("location", row))) || "Main vault · Intake", acquiredOn: txt(form.get(field("date", row))) || today(),
+      notes: txt(form.get(field("notes", row))) || null, images: (photos[row.id] ?? []).map(({ dataUrl, captured }) => ({ dataUrl, captured })),
+    }));
+    setSaving(true);
+    try { await save(stones); } finally { setSaving(false); }
+  };
+  return (
+    <form className="batch-intake" action={submit}>
+      <div className="batch-intake-summary">
+        <div><span>{rows.length}</span><strong>stones in this intake</strong><small>All records save together or none are saved.</small></div>
+        <button type="button" className="ops-secondary" onClick={() => setRows((current) => [...current, newRow()])} disabled={rows.length >= 20}><Plus size={17} /> Add another stone</button>
+      </div>
+      <div className="batch-stone-list">
+        {rows.map((row, index) => (
+          <details className="panel batch-stone-card" key={row.id}>
+            <summary>
+              <span className="batch-number">{index + 1}</span>
+              <span><strong>Stone {index + 1}</strong><small>Identity, measurements and purchase information</small></span>
+              {rows.length > 2 && <button type="button" className="batch-remove" onClick={(event) => { event.preventDefault(); setRows((current) => current.filter((item) => item.id !== row.id)); setPhotos((current) => { const next = { ...current }; delete next[row.id]; return next; }); }}><Trash2 size={15} /> Remove</button>}
+            </summary>
+            <div className="batch-stone-fields">
+              <label>Gem type *<CategorySelect name={field("type", row)} categoryKey="GEM_TYPE" categories={categories} required placeholder="Select gem type" refresh={refresh} /></label>
+              <label>Weight · ct *<input name={field("weight", row)} type="number" min="0.001" step="0.001" required placeholder="0.000" /></label>
+              <label>Origin / locality *<input name={field("origin", row)} required placeholder="e.g. Ratnapura" /></label>
+              <label>Supplier<DetailedSelect name={field("seller", row)} placeholder="No supplier selected" options={sellers.map((item) => ({ value: String(item.id), label: item.name, subtitle: "Supplier", images: item.images.map((image) => image.url), details: [["Phone", item.phone], ["Email", item.email], ["Locality", item.locality], ["Notes", item.notes]] }))} /></label>
+              <label>Purchase date<input name={field("date", row)} type="date" defaultValue={today()} /></label>
+              <label>Purchase cost · LKR<input name={field("purchase", row)} type="number" min="0" defaultValue="0" /></label>
+              <label>Shape<CategorySelect name={field("shape", row)} categoryKey="SHAPE" categories={categories} placeholder="Select shape" refresh={refresh} /></label>
+              <label>Cut<CategorySelect name={field("cut", row)} categoryKey="CUT" categories={categories} placeholder="Select cut" refresh={refresh} /></label>
+              <label>Colour<CategorySelect name={field("color", row)} categoryKey="COLOR" categories={categories} placeholder="Select colour" refresh={refresh} /></label>
+              <label>Treatment<CategorySelect name={field("treatment", row)} categoryKey="TREATMENT" categories={categories} defaultValue="Not assessed" placeholder="Select treatment" refresh={refresh} /></label>
+              <label>Lab reference<input name={field("certificate", row)} placeholder="Optional" /></label>
+              <label>Receiving location<input name={field("location", row)} defaultValue="Main vault · Intake" /></label>
+              <label className="batch-notes">Notes<textarea name={field("notes", row)} rows={2} placeholder="Condition or intake observations" /></label>
+              <div className="batch-photo-field">
+                <span><strong>Stone images</strong><small>{(photos[row.id] ?? []).length}/4 added</small></span>
+                <div className="batch-photo-thumbs">{(photos[row.id] ?? []).map((photo, photoIndex) => <button type="button" key={`${photo.dataUrl.slice(-20)}-${photoIndex}`} onClick={() => setPhotos((all) => ({ ...all, [row.id]: (all[row.id] ?? []).filter((_, itemIndex) => itemIndex !== photoIndex) }))} aria-label={`Remove image ${photoIndex + 1}`}><Image src={photo.dataUrl} alt={`Stone ${index + 1} image ${photoIndex + 1}`} width={64} height={64} unoptimized /><X size={13} /></button>)}</div>
+                <div className="photo-actions"><label className="ops-secondary photo-button"><ImagePlus size={16} /> Upload<input hidden type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={(event) => void addImages(row.id, event.target.files, false)} /></label><label className="ops-secondary photo-button"><Camera size={16} /> Camera<input hidden type="file" accept="image/*" capture="environment" onChange={(event) => void addImages(row.id, event.target.files, true)} /></label></div>
+              </div>
+            </div>
+          </details>
+        ))}
+      </div>
+      <div className="batch-intake-footer"><button type="button" className="ops-secondary" onClick={cancel}>Cancel</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Saving stones…" : `Register ${rows.length} stones`} <ArrowRight size={17} /></button></div>
+    </form>
+  );
+}
+
 function Intake({
   saveStone,
+  saveStoneBatch,
   navigate,
   stone,
   sellers,
+  categories,
+  refresh,
 }: {
   saveStone: Actions["saveStone"];
+  saveStoneBatch: (stones: Array<Record<string, unknown>>) => Promise<void>;
   navigate: Actions["navigate"];
   stone?: Stone;
   sellers: Ledger["sellers"];
+  categories: Ledger["categories"];
+  refresh: () => Promise<void>;
 }) {
+  const [intakeMode, setIntakeMode] = useState<"single" | "batch">("single");
   const [photos, setPhotos] = useState<PhotoDraft[]>(
     () =>
       stone?.images.map((image) => ({
@@ -1463,6 +2269,7 @@ function Intake({
   const [selectedSeller, setSelectedSeller] = useState(
     stone?.sellerId ? String(stone.sellerId) : "",
   );
+  const [sellerPhotos, setSellerPhotos] = useState<PhotoDraft[]>([]);
   const addPhotos = async (files: FileList | null, captured: boolean) => {
     if (!files?.length) return;
     const remaining = 4 - photos.length;
@@ -1516,6 +2323,15 @@ function Intake({
             : "Confirm the physical item, source and initial characteristics before assigning its permanent ID."
         }
       />
+      {!stone && (
+        <div className="intake-mode-switch" role="group" aria-label="Intake mode">
+          <button type="button" className={intakeMode === "single" ? "active" : ""} onClick={() => setIntakeMode("single")}><Gem size={17} /><span><strong>Single stone</strong><small>Full individual record</small></span></button>
+          <button type="button" className={intakeMode === "batch" ? "active" : ""} onClick={() => setIntakeMode("batch")}><Plus size={17} /><span><strong>Multiple stones</strong><small>Register 2–20 together</small></span></button>
+        </div>
+      )}
+      {!stone && intakeMode === "batch" ? (
+        <BatchIntake sellers={sellers} categories={categories} refresh={refresh} save={saveStoneBatch} cancel={() => navigate("inventory")} />
+      ) : (
       <form
         className="panel ops-form-card"
         action={(form) => saveStone(form, photos, removedImageIds)}
@@ -1531,19 +2347,16 @@ function Intake({
         <div className="ops-fields">
           <label>
             Gem type *
-            <input
+            <CategorySelect
               name="type"
-              list="gem-type-options"
+              categoryKey="GEM_TYPE"
+              categories={categories}
               required
               defaultValue={stone?.type ?? ""}
               placeholder="Select or type a gem type"
+              refresh={refresh}
             />
-            <datalist id="gem-type-options">
-              {gemTypes.map((item) => (
-                <option key={item} value={item} />
-              ))}
-            </datalist>
-            <small>Select a suggestion or type a new gem type.</small>
+            <small>Select a gem type or use + to create one.</small>
           </label>
           <label>
             Origin / locality *
@@ -1556,20 +2369,16 @@ function Intake({
           </label>
           <label>
             Seller / source
-            <select
+            <DetailedSelect
               name="sellerId"
               value={selectedSeller}
-              onChange={(event) => setSelectedSeller(event.target.value)}
-            >
-              <option value="">No seller selected</option>
-              {sellers.map((seller) => (
-                <option key={seller.id} value={seller.id}>
-                  {seller.name}
-                  {seller.locality ? ` · ${seller.locality}` : ""}
-                </option>
-              ))}
-              <option value="__new__">＋ Add a new seller</option>
-            </select>
+              onValueChange={setSelectedSeller}
+              placeholder="No seller selected"
+              options={[
+                ...sellers.map((item) => ({ value: String(item.id), label: `${item.name}${item.locality ? ` · ${item.locality}` : ""}`, subtitle: "Supplier", images: item.images.map((image) => image.url), details: [["Name", item.name], ["Phone", item.phone], ["Email", item.email], ["Locality", item.locality], ["Notes", item.notes]] as Array<[string, string]> })),
+                { value: "__new__", label: "＋ Add a new seller", subtitle: "Create supplier during intake", details: [["Next step", "Enter the new supplier details below"]] },
+              ]}
+            />
           </label>
           <label>
             Purchase date
@@ -1621,6 +2430,115 @@ function Intake({
                   placeholder="Town or district"
                 />
               </label>
+              <input
+                type="hidden"
+                name="sellerImages"
+                value={JSON.stringify(
+                  sellerPhotos.map(({ dataUrl, captured }) => ({
+                    dataUrl,
+                    captured,
+                  })),
+                )}
+              />
+              <div className="seller-photo-field ops-full">
+                <div>
+                  <strong>
+                    Seller images <span className="optional-label">Optional</span>
+                  </strong>
+                  <small>
+                    The first image becomes the profile image. Add up to four images.
+                  </small>
+                </div>
+                {sellerPhotos.length > 0 && (
+                  <div className="photo-grid seller-photo-grid">
+                    {sellerPhotos.map((photo, index) => (
+                      <div
+                        className="photo-tile"
+                        key={`${photo.dataUrl.slice(-18)}-${index}`}
+                      >
+                        <Image
+                          unoptimized
+                          width={400}
+                          height={400}
+                          src={photo.dataUrl}
+                          alt={`Seller preview ${index + 1}`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSellerPhotos((current) =>
+                              current.filter((_, itemIndex) => itemIndex !== index),
+                            )
+                          }
+                          aria-label={`Remove seller image ${index + 1}`}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                        {index === 0 && <span>PROFILE</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="photo-actions">
+                  <label className="ops-secondary photo-button">
+                    <ImagePlus size={17} /> Add images
+                    <input
+                      hidden
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      multiple
+                      onChange={(event) => {
+                        const remaining = 4 - sellerPhotos.length;
+                        void Promise.all(
+                          Array.from(event.target.files ?? [])
+                            .slice(0, remaining)
+                            .map(async (file) => ({
+                              dataUrl: await squarePhoto(file),
+                              captured: false,
+                            })),
+                        )
+                          .then((prepared) =>
+                            setSellerPhotos((current) => [...current, ...prepared]),
+                          )
+                          .catch((error) =>
+                            toast.error(
+                              error instanceof Error
+                                ? error.message
+                                : "Seller image could not be prepared",
+                            ),
+                          );
+                      }}
+                    />
+                  </label>
+                  <label className="ops-secondary photo-button">
+                    <Camera size={17} /> Take photo
+                    <input
+                      hidden
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (!file || sellerPhotos.length >= 4) return;
+                        void squarePhoto(file)
+                          .then((dataUrl) =>
+                            setSellerPhotos((current) => [
+                              ...current,
+                              { dataUrl, captured: true },
+                            ]),
+                          )
+                          .catch((error) =>
+                            toast.error(
+                              error instanceof Error
+                                ? error.message
+                                : "Seller photo could not be prepared",
+                            ),
+                          );
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -1646,57 +2564,49 @@ function Intake({
           </label>
           <label>
             Shape
-            <input
+            <CategorySelect
               name="shape"
-              list="shape-options"
+              categoryKey="SHAPE"
+              categories={categories}
               defaultValue={stone ? editable(stone.shape) : ""}
-              placeholder="Select or type a shape"
+              placeholder="Select shape"
+              refresh={refresh}
             />
-            <datalist id="shape-options">
-              {stoneShapes.map((item) => (
-                <option key={item} value={item} />
-              ))}
-            </datalist>
-            <small>
-              Common 1 ct store shapes are included; custom shapes are accepted.
-            </small>
+            <small>Select a shape or use + to create one.</small>
           </label>
           <label>
             Cut
-            <input
+            <CategorySelect
               name="cut"
-              list="cut-options"
+              categoryKey="CUT"
+              categories={categories}
               defaultValue={stone ? editable(stone.cut) : ""}
-              placeholder="Select or type a cut"
+              placeholder="Select cut"
+              refresh={refresh}
             />
-            <datalist id="cut-options">
-              {cutStyles.map((item) => (
-                <option key={item} value={item} />
-              ))}
-            </datalist>
-            <small>
-              The original choices remain available, and new cuts can be typed.
-            </small>
+            <small>Select a cut or use + to create one.</small>
           </label>
           <label>
             Colour
-            <input
+            <CategorySelect
               name="color"
+              categoryKey="COLOR"
+              categories={categories}
               defaultValue={stone ? editable(stone.color) : ""}
-              placeholder="Hue, tone and saturation"
+              placeholder="Select colour"
+              refresh={refresh}
             />
           </label>
           <label>
             Treatment declaration
-            <select
+            <CategorySelect
               name="treatment"
+              categoryKey="TREATMENT"
+              categories={categories}
               defaultValue={stone?.treatment ?? "Not assessed"}
-            >
-              <option>Not assessed</option>
-              <option>No treatment declared</option>
-              <option>Heated · dealer disclosed</option>
-              <option>Other treatment disclosed</option>
-            </select>
+              placeholder="Select treatment"
+              refresh={refresh}
+            />
           </label>
           <label>
             Existing lab reference
@@ -1814,6 +2724,7 @@ function Intake({
           </button>
         </div>
       </form>
+      )}
     </>
   );
 }
@@ -2276,7 +3187,42 @@ function Sales({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
           <strong>{money(sold.reduce((n, h) => n + h.finalPrice, 0))}</strong>
           <small>{sold.length} salesman sales</small>
         </div>
+        <div className="metric">
+          <span>Direct sales</span>
+          <strong>
+            {money(
+              ledger.directSales.reduce(
+                (total, sale) => total + sale.finalPrice,
+                0,
+              ),
+            )}
+          </strong>
+          <small>{ledger.directSales.length} recorded buyers</small>
+        </div>
       </div>
+      <Panel
+        title="Available for direct sale"
+        sub="Record a buyer and complete an immediate sale"
+      >
+        <div className="ops-queue">
+          {ledger.stones
+            .filter((stone) => stone.status === "Available")
+            .slice(0, 6)
+            .map((stone) => (
+              <div className="ops-queue-row" key={stone.id}>
+                <div>
+                  <strong>
+                    {stone.type} · {stone.weight.toFixed(2)} ct
+                  </strong>
+                  <small>{stone.productId}</small>
+                </div>
+                <button onClick={() => actions.open("direct-sale", stone.id)}>
+                  Direct sale <ArrowRight size={14} />
+                </button>
+              </div>
+            ))}
+        </div>
+      </Panel>
       <Panel
         title="Active handovers"
         sub="Stones currently held by salesmen for a sales attempt"
@@ -2366,15 +3312,250 @@ function Sales({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
           ))}
         </div>
       </Panel>
+      <Panel title="Direct sale history" sub="Buyer details and final prices">
+        <div className="ops-queue">
+          {ledger.directSales.map((sale) => (
+            <div className="ops-queue-row" key={sale.id}>
+              <div>
+                <strong>
+                  {sale.stoneId} · {sale.buyer}
+                </strong>
+                <small>
+                  {[sale.buyerPhone, sale.buyerEmail, sale.buyerLocality]
+                    .filter(Boolean)
+                    .join(" · ") || "No optional contact details"}
+                </small>
+              </div>
+              <strong>{money(sale.finalPrice)}</strong>
+            </div>
+          ))}
+          {!ledger.directSales.length && (
+            <p className="ops-empty">No direct sales recorded yet.</p>
+          )}
+        </div>
+      </Panel>
     </>
   );
 }
+
+function Jewellery({
+  ledger,
+  stone,
+  actions,
+  refresh,
+}: {
+  ledger: Ledger;
+  stone: Stone;
+  actions: Actions;
+  refresh: () => Promise<void>;
+}) {
+  const profile = ledger.jewelleryProfiles.find((item) => item.stoneId === stone?.id);
+  const activeJobs = ledger.jewelleryJobs.filter((job) => job.status === "With workshop");
+  if (!profile) {
+    return (
+      <>
+        <Heading
+          kicker="JEWELLERY PRODUCTION"
+          title="Jewellery"
+          sub="Track stones handed to jewellery workshops and receive completed pieces."
+          button="Create jewellery"
+          onClick={() =>
+            actions.open(
+              "jewellery-handover",
+              ledger.stones.find((item) => item.status === "Available")?.id,
+            )
+          }
+        />
+        <Panel title="With jewellery workshops" sub="Awaiting finished pieces">
+          <div className="ops-queue">
+            {activeJobs.map((job) => {
+              const source = ledger.stones.find((record) => record.id === job.stoneId);
+              return (
+                <div className="ops-queue-row" key={job.id}>
+                  {source ? <StoneLink stone={source} navigate={actions.navigate} /> : <div><strong>{job.stoneId} · {job.workshop}</strong></div>}
+                  <div><small>{job.workshop} · Due {job.deadline} · {job.instructions || "No instructions"}</small></div>
+                  <button onClick={() => actions.open("jewellery-receive", job.stoneId)}>
+                    Receive jewellery <ArrowRight size={14} />
+                  </button>
+                </div>
+              );
+            })}
+            {!activeJobs.length && <p className="ops-empty">No active jewellery jobs.</p>}
+          </div>
+        </Panel>
+        <Panel title="Jewellery profiles" sub="Finished pieces linked to their original stones">
+          <div className="ops-queue">
+            {ledger.jewelleryProfiles.map((item) => {
+              const source = ledger.stones.find((record) => record.id === item.stoneId);
+              const preview = item.images[0] ?? source?.images[0];
+              return (
+                <div className="ops-queue-row" key={item.id}>
+                  <div className="jewellery-list-identity">
+                    <span className={`gem-swatch ${preview ? "has-image" : ""}`}>
+                      {preview ? <Image unoptimized width={120} height={120} src={preview.url} alt={`${item.itemType} thumbnail`} /> : <Gem size={23} />}
+                    </span>
+                    <span>
+                    <strong>{item.itemType} · {item.id}</strong>
+                    <small>{source?.type} · {item.metalType} · {item.metalPurity}</small>
+                    </span>
+                  </div>
+                  <button onClick={() => actions.navigate("stone", item.stoneId)}>
+                    Open <ArrowRight size={14} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </Panel>
+      </>
+    );
+  }
+  const events = ledger.events.filter((event) => event.stoneId === stone.id);
+  const jobs = ledger.jobs.filter((job) => job.stoneId === stone.id);
+  return (
+    <>
+      <button className="back-button" onClick={() => actions.navigate("jewellery")}>
+        <ArrowLeft size={17} /> Jewellery register
+      </button>
+      <div className="stone-hero ops-hero">
+        <div className="gem-visual">
+          {profile.images[0] ? (
+            <Image unoptimized width={1000} height={1000} src={profile.images[0].url} alt={profile.itemType} />
+          ) : (
+            <Gem size={60} strokeWidth={1} />
+          )}
+        </div>
+        <div className="stone-title">
+          <div><Badge value="Jewellery" /><span className="stone-id">{profile.id}</span></div>
+          <h1>{profile.itemType}</h1>
+          <p>{stone.type} · {profile.metalType} · {profile.metalPurity}</p>
+        </div>
+        <div className="stone-hero-actions">
+          <button className="ops-secondary" onClick={() => actions.open("jewellery-edit", stone.id)}>
+            <Pencil size={17} /> Edit jewellery
+          </button>
+        </div>
+      </div>
+      <div className="ops-detail-grid">
+        <div className="ops-detail-main">
+          <Panel title="Jewellery setting" sub="Editable finished-piece specifications">
+            <div className="fact-grid">
+              {[
+                ["Item type", profile.itemType],
+                ["Metal", profile.metalType],
+                ["Purity / karats", profile.metalPurity],
+                ["Metal weight", profile.metalWeight ? `${profile.metalWeight.toFixed(3)} g` : "Not recorded"],
+                ["Total weight", profile.totalWeight ? `${profile.totalWeight.toFixed(3)} g` : "Not recorded"],
+                ["Setting style", profile.settingStyle],
+                ["Size", profile.itemSize],
+                ["Description", profile.description || "Not recorded"],
+              ].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}
+            </div>
+          </Panel>
+          <Panel title="Jewellery images" sub="Upload or capture up to four square images">
+            <div className="stone-gallery">
+              {profile.images.map((image, index) => (
+                <Image unoptimized width={1000} height={1000} key={image.id} src={image.url} alt={`${profile.itemType} ${index + 1}`} />
+              ))}
+            </div>
+            <div className="photo-actions">
+              <label className="photo-button">
+                <ImagePlus size={17} /> Upload images
+                <input
+                  hidden
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files ?? []).slice(0, 4 - profile.images.length);
+                    void Promise.all(files.map(async (file) => ({ dataUrl: await squarePhoto(file), captured: false })))
+                      .then(async (images) => {
+                        if (!images.length) return;
+                        await api.addJewelleryImages(profile.id, images);
+                        await refresh();
+                        toast.success("Jewellery images saved.");
+                      })
+                      .catch((error) => toast.error(error instanceof Error ? error.message : "Image upload failed"));
+                  }}
+                />
+              </label>
+              <label className="photo-button">
+                <Camera size={17} /> Take photo
+                <input
+                  hidden
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    void squarePhoto(file)
+                      .then(async (dataUrl) => {
+                        await api.addJewelleryImages(profile.id, [{ dataUrl, captured: true }]);
+                        await refresh();
+                        toast.success("Jewellery photo saved.");
+                      })
+                      .catch((error) => toast.error(error instanceof Error ? error.message : "Photo capture failed"));
+                  }}
+                />
+              </label>
+            </div>
+          </Panel>
+          <Panel title="Original stone details" sub="The complete source-stone record remains permanently attached">
+            <div className="fact-grid">
+              {[
+                ["Product ID", stone.productId], ["Stone ID", stone.id], ["Gem type", stone.type],
+                ["Origin", stone.origin], ["Intake weight", `${stone.originalWeight.toFixed(2)} ct`],
+                ["Final stone weight", `${stone.weight.toFixed(2)} ct`], ["Shape", stone.shape],
+                ["Cut", stone.cut], ["Colour", stone.color], ["Treatment", stone.treatment],
+                ["Certificate", stone.certificate], ["Seller", stone.seller], ["Acquired", stone.acquired],
+              ].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}
+            </div>
+          </Panel>
+          {stone.images.length > 0 && <Panel title="Original stone images"><div className="stone-gallery">{stone.images.map((image, index) => <Image unoptimized width={1000} height={1000} key={image.id} src={image.url} alt={`Original stone ${index + 1}`} />)}</div></Panel>}
+          <Panel title="Complete lifecycle history" sub={`${events.length} permanent source and jewellery events`}>
+            {events.map((event) => <div className="ops-timeline-row" key={event.id}><span className="ops-timeline-icon"><History size={16} /></span><div><div><strong>{event.title}</strong><Badge value={event.category} /></div><p>{event.detail}</p><small>{event.at} · {event.actor}</small></div></div>)}
+          </Panel>
+        </div>
+        <aside className="ops-detail-aside">
+          <Panel title="Source stone"><div className="ops-aside-data"><span>STONE</span><strong>{stone.id}</strong><span>PURCHASE COST</span><strong>{money(stone.purchase)}</strong><span>WORKSHOP JOBS</span><strong>{jobs.length}</strong></div></Panel>
+          <Panel title="Available operations"><div className="ops-side-actions"><Action onClick={() => actions.open("promotion-handover", stone.id)}>Hand over for promotion</Action><Action onClick={() => actions.open("direct-sale", stone.id)}>Record direct sale</Action></div></Panel>
+        </aside>
+      </div>
+    </>
+  );
+}
+
+function Promotions({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
+  const active = ledger.promotionHandovers.filter((item) => item.status === "With company");
+  return (
+    <>
+      <Heading kicker="PROMOTIONAL CUSTODY" title="Promotions" sub="No-cost company handovers with deadlines and return acknowledgement." button="New handover" onClick={() => actions.open("promotion-handover", ledger.stones.find((item) => ["Available", "Jewellery"].includes(item.status) && !active.some((handover) => handover.stoneId === item.id))?.id)} />
+      <div className="ops-metrics"><div className="metric accent"><span>With companies</span><strong>{active.length}</strong><small>Awaiting return</small></div><div className="metric"><span>Overdue</span><strong>{active.filter((item) => item.deadline < today()).length}</strong><small>Past their deadline</small></div><div className="metric"><span>Returned</span><strong>{ledger.promotionHandovers.filter((item) => item.status === "Returned").length}</strong><small>Custody restored</small></div></div>
+      <Panel title="Active promotion handovers" sub="Receive every item on or before its deadline">
+        <div className="ops-queue">{active.map((item) => <div className="ops-queue-row" key={item.id}><div><strong>{item.stoneId} · {item.company}</strong><small>Given {new Date(item.handedOverAt).toLocaleString("en-LK", { dateStyle: "medium", timeStyle: "short" })} · due {item.deadline}</small></div><button onClick={() => actions.open("promotion-return", item.stoneId)}>Receive <ArrowRight size={14} /></button></div>)}{!active.length && <p className="ops-empty">No items are currently with promotion companies.</p>}</div>
+      </Panel>
+      <Panel title="Company directory"><div className="contact-grid ops-contacts">{ledger.companies.map((company, index) => <article className="panel contact-card" key={company.id}><div className={`contact-avatar tone-${index % 4}`}>{company.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}</div><div><h2>{company.name}</h2><Badge value="Company" /></div><hr /><span>{company.contactPerson || "No contact person"}</span><small>{company.phone} · {company.email}</small></article>)}</div></Panel>
+    </>
+  );
+}
+
 function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
   const sold = ledger.salesmanHandovers.filter(
       (handover) => handover.status === "Sold",
     ),
-    revenue = sold.reduce((n, handover) => n + handover.finalPrice, 0),
-    cost = sold.reduce(
+    allSold = [
+      ...sold.map((handover) => ({
+        stoneId: handover.stoneId,
+        finalPrice: handover.finalPrice,
+      })),
+      ...ledger.directSales.map((sale) => ({
+        stoneId: sale.stoneId,
+        finalPrice: sale.finalPrice,
+      })),
+    ],
+    revenue = allSold.reduce((n, sale) => n + sale.finalPrice, 0),
+    cost = allSold.reduce(
       (n, handover) =>
         n +
         (ledger.stones.find((x) => x.id === handover.stoneId)?.purchase || 0) +
@@ -2396,7 +3577,7 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
         <div className="metric accent">
           <span>Revenue</span>
           <strong>{money(revenue)}</strong>
-          <small>{sold.length} completed sales</small>
+          <small>{allSold.length} completed sales</small>
         </div>
         <div className="metric">
           <span>Gross profit</span>
@@ -2474,7 +3655,6 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                     "Status",
                     "Location",
                     "Purchase LKR",
-                    "Asking LKR",
                   ],
                   ledger.stones.map((s) => [
                     s.productId,
@@ -2485,7 +3665,6 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                     s.status,
                     s.location,
                     s.purchase,
-                    s.asking,
                   ]),
                 )
               }
@@ -2581,6 +3760,35 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
             >
               Salesman handovers CSV
             </Action>
+            <Action
+              onClick={() =>
+                actions.download(
+                  "origin-direct-sales.csv",
+                  [
+                    "Reference",
+                    "Stone",
+                    "Buyer",
+                    "Phone",
+                    "Email",
+                    "Locality",
+                    "Final price LKR",
+                    "Sold at",
+                  ],
+                  ledger.directSales.map((sale) => [
+                    sale.id,
+                    sale.stoneId,
+                    sale.buyer,
+                    sale.buyerPhone,
+                    sale.buyerEmail,
+                    sale.buyerLocality,
+                    sale.finalPrice,
+                    sale.soldAt,
+                  ]),
+                )
+              }
+            >
+              Direct sales CSV
+            </Action>
           </div>
         </Panel>
       </div>
@@ -2598,7 +3806,7 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
             </thead>
             <tbody>
               {ledger.stones.map((s) => {
-                const sale = sold.find((x) => x.stoneId === s.id),
+                const sale = allSold.find((x) => x.stoneId === s.id),
                   jobs = ledger.jobs
                     .filter(
                       (j) => j.stoneId === s.id && j.status === "Returned",
@@ -2632,31 +3840,161 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
     </>
   );
 }
-function Directory({ ledger }: { ledger: Ledger }) {
+function Categories({
+  ledger,
+  refresh,
+}: {
+  ledger: Ledger;
+  refresh: () => Promise<void>;
+}) {
+  const [editingItem, setEditingItem] = useState<Ledger["categories"][number] | null>(null);
+  const [addingKey, setAddingKey] = useState<CategoryKey | null>(null);
+  const save = async (form: FormData) => {
+    const categoryKey = txt(form.get("categoryKey")) as CategoryKey;
+    const data = {
+      categoryKey,
+      name: txt(form.get("name")),
+      description: txt(form.get("description")),
+      sortOrder: number(form.get("sortOrder")),
+    };
+    try {
+      if (editingItem) await api.updateCategory(editingItem.id, data);
+      else await api.addCategory(data);
+      setEditingItem(null);
+      setAddingKey(null);
+      await refresh();
+      toast.success(editingItem ? "Category item updated." : "Category item added.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Category could not be saved");
+    }
+  };
+  return (
+    <>
+      <Heading
+        kicker="MASTER DATA"
+        title="Categories"
+        sub="Manage the choices used across stone, treatment, jewellery and payment forms."
+      />
+      <div className="category-page-grid">
+        {(Object.keys(categoryLabels) as CategoryKey[]).map((key) => {
+          const items = ledger.categories.filter((item) => item.categoryKey === key);
+          return (
+            <section className="panel category-panel" key={key}>
+              <div className="panel-head">
+                <div><h2>{categoryLabels[key]}</h2><p>{items.length} active choices</p></div>
+                <button className="icon-action" onClick={() => setAddingKey(key)} aria-label={`Add ${categoryLabels[key]}`}><Plus size={17} /><span>Add</span></button>
+              </div>
+              <div className="category-list">
+                {items.map((item) => (
+                  <div key={item.id}>
+                    <span><strong>{item.name}</strong>{item.description && <small>{item.description}</small>}</span>
+                    <span className="row-actions">
+                      <button type="button" onClick={() => setEditingItem(item)} aria-label={`Edit ${item.name}`}><Pencil size={15} /><span>Edit</span></button>
+                      <button type="button" onClick={() => {
+                        if (!window.confirm(`Remove ${item.name} from active choices? Existing records will be kept.`)) return;
+                        void api.deleteCategory(item.id).then(async () => { await refresh(); toast.success("Category item removed from active choices."); }).catch((error) => toast.error(error instanceof Error ? error.message : "Could not remove category"));
+                      }} aria-label={`Remove ${item.name}`}><Trash2 size={15} /><span>Remove</span></button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+      <Dialog open={!!addingKey || !!editingItem} onOpenChange={(open) => { if (!open) { setAddingKey(null); setEditingItem(null); } }}>
+        <DialogContent className="ops-dialog compact-dialog">
+          <DialogHeader><DialogTitle>{editingItem ? "Edit category item" : "Add category item"}</DialogTitle><DialogDescription>This choice becomes available throughout the application.</DialogDescription></DialogHeader>
+          <form action={save}>
+            <div className="ops-dialog-fields">
+              <label>Category<DetailedSelect name="categoryKey" defaultValue={editingItem?.categoryKey ?? addingKey ?? "GEM_TYPE"} options={(Object.keys(categoryLabels) as CategoryKey[]).map((key) => ({ value: key, label: categoryLabels[key], subtitle: "Application-wide category", details: [["Used for", categoryLabels[key]]] }))} /></label>
+              <label>Name<input name="name" required defaultValue={editingItem?.name ?? ""} /></label>
+              <label>Display order<input name="sortOrder" type="number" min="0" defaultValue={editingItem?.sortOrder ?? 0} /></label>
+              <label className="ops-full">Description<textarea name="description" rows={2} defaultValue={editingItem?.description ?? ""} /></label>
+            </div>
+            <div className="dialog-actions"><button type="button" className="ops-secondary" onClick={() => { setAddingKey(null); setEditingItem(null); }}>Cancel</button><button className="primary-button">Save category</button></div>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+type DirectoryEntry = {
+  id: number;
+  entity: "workshops" | "sellers" | "salesmen" | "buyers" | "contacts";
+  name: string;
+  role: string;
+  phone: string;
+  email: string;
+  locality: string;
+  image: string;
+  workshopType?: string;
+};
+
+function Directory({ ledger, refresh }: { ledger: Ledger; refresh: () => Promise<void> }) {
+  const [filter, setFilter] = useState("All");
+  const [editingContact, setEditingContact] = useState<DirectoryEntry | null>(null);
+  const [addingEntity, setAddingEntity] = useState<DirectoryEntry["entity"] | null>(null);
+  const entries: DirectoryEntry[] = [
+    ...ledger.workshops.map((workshop) => ({ id: workshop.id, entity: "workshops" as const, name: workshop.name, role: "Workshop", phone: workshop.phone, email: "", locality: workshop.address, image: "", workshopType: workshop.type })),
+    ...ledger.salesmen.map((salesman) => ({ id: salesman.id, entity: "salesmen" as const, name: salesman.name, role: "Salesman", phone: salesman.phone, email: salesman.email, locality: salesman.locality, image: "" })),
+    ...ledger.buyers.map((buyer) => ({ id: buyer.id, entity: "buyers" as const, name: buyer.name, role: "Buyer", phone: buyer.phone, email: buyer.email, locality: buyer.locality, image: "" })),
+    ...ledger.sellers.map((seller) => ({ id: seller.id, entity: "sellers" as const, name: seller.name, role: "Supplier", phone: seller.phone, email: seller.email, locality: seller.locality, image: seller.images[0]?.url ?? "" })),
+    ...ledger.contacts.filter((contact) => !["Buyer", "Seller"].includes(contact.role)).map((contact) => ({ id: contact.id, entity: "contacts" as const, name: contact.name, role: contact.role, phone: contact.phone, email: contact.email, locality: contact.locality, image: "" })),
+  ];
+  const visible = entries.filter((entry) => filter === "All" || entry.role === filter);
+  const closeEditor = () => { setAddingEntity(null); setEditingContact(null); };
+  const saveContact = async (form: FormData) => {
+    const entity = editingContact?.entity ?? addingEntity;
+    if (!entity) return;
+    const common = { phone: txt(form.get("phone")), email: txt(form.get("email")) || null };
+    const payload: Record<string, unknown> = entity === "contacts"
+      ? { ...common, displayName: txt(form.get("name")), role: txt(form.get("contactRole")) || "OTHER", locality: txt(form.get("locality")) }
+      : entity === "workshops"
+        ? { ...common, name: txt(form.get("name")), workshopType: txt(form.get("workshopType")) || "BOTH", address: txt(form.get("locality")) }
+        : { ...common, name: txt(form.get("name")), locality: txt(form.get("locality")), notes: txt(form.get("notes")) };
+    try {
+      if (editingContact) await api.updateDirectory(entity, editingContact.id, payload);
+      else await api.createDirectory(entity, payload);
+      closeEditor();
+      await refresh();
+      toast.success(editingContact ? "Directory contact updated." : "Directory contact added.");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Contact could not be saved"); }
+  };
   return (
     <>
       <Heading
         kicker="TRADE NETWORK"
         title="Directory"
-        sub="Salesmen, sellers and external providers linked to your operation."
+        sub="Manage workshops, suppliers, salesmen, buyers and other operational contacts."
+        button="Add contact"
+        onClick={() => setAddingEntity("sellers")}
       />
+      <div className="ops-filters directory-filters">
+        {["All", "Workshop", "Supplier", "Salesman", "Buyer", "Cutter", "Laboratory", "Staff", "Other"].map((role) => <button key={role} className={filter === role ? "selected" : ""} onClick={() => setFilter(role)}>{role}</button>)}
+      </div>
       <div className="contact-grid ops-contacts">
-        {[
-          ...ledger.salesmen.map((salesman) => ({
-            name: salesman.name,
-            role: "Salesman",
-            phone: salesman.phone,
-            locality: salesman.locality,
-          })),
-          ...ledger.contacts.filter((contact) => contact.role !== "Buyer"),
-        ].map((c, i) => (
-          <article className="panel contact-card" key={c.name}>
-            <div className={`contact-avatar tone-${i % 4}`}>
-              {c.name
-                .split(" ")
-                .map((w) => w[0])
-                .slice(0, 2)
-                .join("")}
+        {visible.map((c, i) => (
+          <article className="panel contact-card" key={`${c.entity}-${c.id}`}>
+            <div
+              className={`contact-avatar tone-${i % 4} ${c.image ? "has-image" : ""}`}
+            >
+              {c.image ? (
+                <Image
+                  unoptimized
+                  width={120}
+                  height={120}
+                  src={c.image}
+                  alt={c.name}
+                />
+              ) : (
+                c.name
+                  .split(" ")
+                  .map((w) => w[0])
+                  .slice(0, 2)
+                  .join("")
+              )}
             </div>
             <div>
               <h2>{c.name}</h2>
@@ -2665,30 +4003,55 @@ function Directory({ ledger }: { ledger: Ledger }) {
             <hr />
             <span>{c.locality}</span>
             <small>{c.phone}</small>
+            {c.email && <small>{c.email}</small>}
+            <div className="contact-card-actions"><button type="button" onClick={() => setEditingContact(c)}><Pencil size={15} /> Edit</button><button type="button" onClick={() => { if (!window.confirm(`Remove ${c.name} from the active directory?`)) return; void api.deleteDirectory(c.entity, c.id).then(async () => { await refresh(); toast.success("Contact removed from the active directory."); }).catch((error) => toast.error(error instanceof Error ? error.message : "Contact could not be removed")); }}><Trash2 size={15} /> Remove</button></div>
           </article>
         ))}
       </div>
+      <Dialog open={!!addingEntity || !!editingContact} onOpenChange={(open) => { if (!open) closeEditor(); }}>
+        <DialogContent className="ops-dialog compact-dialog">
+          <DialogHeader><DialogTitle>{editingContact ? `Edit ${editingContact.role}` : "Add directory contact"}</DialogTitle><DialogDescription>Changes are saved to the shared MySQL directory.</DialogDescription></DialogHeader>
+          <form action={saveContact}>
+            <div className="ops-dialog-fields">
+              {!editingContact && <label>Contact type<DetailedSelect value={addingEntity ?? "sellers"} onValueChange={(entry) => setAddingEntity(entry as DirectoryEntry["entity"])} options={[{value:"workshops",label:"Workshop"},{value:"sellers",label:"Supplier"},{value:"salesmen",label:"Salesman"},{value:"buyers",label:"Buyer"},{value:"contacts",label:"Other contact"}].map((item) => ({ ...item, subtitle: "Directory contact type", details: [["Type", item.label]] }))} /></label>}
+              <label>Name<input name="name" required defaultValue={editingContact?.name ?? ""} /></label>
+              {(editingContact?.entity ?? addingEntity) === "workshops" && <label>Workshop type<DetailedSelect name="workshopType" defaultValue={editingContact?.workshopType ?? "BOTH"} options={[["CUTTING","Cutting"],["TREATMENT","Treatment"],["BOTH","Cutting & treatment"],["JEWELLERY","Jewellery"],["ALL","All services"]].map(([value,label]) => ({ value, label, subtitle: "Workshop capability", details: [["Services", label]] }))} /></label>}
+              {(editingContact?.entity ?? addingEntity) === "contacts" && <label>Role<DetailedSelect name="contactRole" defaultValue={editingContact?.role.toUpperCase() ?? "OTHER"} options={[["CUTTER","Cutter"],["LABORATORY","Laboratory"],["STAFF","Staff"],["OTHER","Other"]].map(([value,label]) => ({ value, label, subtitle: "Directory role", details: [["Role", label]] }))} /></label>}
+              <label>Phone<input name="phone" type="tel" defaultValue={editingContact?.phone ?? ""} /></label>
+              <label>Email<input name="email" type="email" defaultValue={editingContact?.email ?? ""} /></label>
+              <label>{(editingContact?.entity ?? addingEntity) === "workshops" ? "Address" : "Locality"}<input name="locality" defaultValue={editingContact?.locality ?? ""} /></label>
+              {!['workshops','contacts'].includes(editingContact?.entity ?? addingEntity ?? '') && <label className="ops-full">Notes<textarea name="notes" rows={2} /></label>}
+            </div>
+            <div className="dialog-actions"><button type="button" className="ops-secondary" onClick={closeEditor}>Cancel</button><button className="primary-button">Save contact</button></div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
 
 function OperationDialog({
   operation,
+  stoneLocked,
   close,
   stone,
   ledger,
   submit,
   error,
+  refresh,
 }: {
   operation: Operation | null;
+  stoneLocked: boolean;
   close: () => void;
   stone: Stone;
   ledger: Ledger;
   submit: (f: FormData) => void;
   error: string;
+  refresh: () => Promise<void>;
 }) {
   const [jobKind, setJobKind] = useState<"Cutting" | "Treatment">("Cutting");
   const [jobWorkshop, setJobWorkshop] = useState("");
+  const [buyerChoice, setBuyerChoice] = useState("");
   const titles: Record<Operation, string> = {
     job: "Create workshop job",
     dispatch: "Dispatch to provider",
@@ -2701,10 +4064,15 @@ function OperationDialog({
     payment: "Receive payment",
     hold: "Place stone on hold",
     "clear-hold": "Clear exception hold",
-    price: "Set asking price",
     "sales-handover": "Hand stone to salesman",
     "sales-return": "Receive stone from salesman",
     "sales-complete": "Record salesman sale",
+    "direct-sale": "Record direct sale",
+    "jewellery-handover": "Create jewellery job",
+    "jewellery-receive": "Receive finished jewellery",
+    "jewellery-edit": "Edit jewellery profile",
+    "promotion-handover": "Promotion handover",
+    "promotion-return": "Receive promotion item",
   };
   const openJobs = ledger.jobs.filter(
       (j) => j.stoneId === stone.id && j.status !== "Returned",
@@ -2718,12 +4086,25 @@ function OperationDialog({
     activeSalesmanHandover = ledger.salesmanHandovers.find(
       (handover) =>
         handover.stoneId === stone.id && handover.status === "With salesman",
+    ),
+    jewelleryProfile = ledger.jewelleryProfiles.find(
+      (profile) => profile.stoneId === stone.id,
+    ),
+    activeJewelleryJob = ledger.jewelleryJobs.find(
+      (job) => job.stoneId === stone.id && job.status === "With workshop",
+    ),
+    activePromotion = ledger.promotionHandovers.find(
+      (handover) =>
+        handover.stoneId === stone.id && handover.status === "With company",
     );
   const allowed =
     operation === "job" ||
     operation === "reserve" ||
     operation === "sale" ||
-    operation === "sales-handover";
+    operation === "sales-handover" ||
+    operation === "direct-sale" ||
+    operation === "jewellery-handover" ||
+    operation === "promotion-handover";
   const kindCode = jobKind === "Cutting" ? "CUTTING" : "TREATMENT";
   const eligibleWorkshops = ledger.workshops.filter(
     (workshop) => workshop.type === "BOTH" || workshop.type === kindCode,
@@ -2738,6 +4119,30 @@ function OperationDialog({
       String(provider.workshopId) === selectedWorkshop &&
       (provider.specialty === "BOTH" || provider.specialty === kindCode),
   );
+  const allStoneOptions = ledger.stones.map((item): DetailOption => ({
+      value: item.id,
+      label: `${item.productId} · ${item.type} · ${item.weight.toFixed(2)} ct`,
+      subtitle: `${item.id} · ${item.status}`,
+      images: item.images.map((image) => image.url),
+      details: [
+        ["Product ID", item.productId], ["Stone ID", item.id], ["Gem type", item.type],
+        ["Weight", `${item.weight.toFixed(2)} ct`], ["Origin", item.origin], ["Colour", item.color],
+        ["Shape", item.shape], ["Cut", item.cut], ["Treatment", item.treatment],
+        ["Certificate", item.certificate], ["Supplier", item.seller], ["Current location", item.location],
+        ["Custodian", item.custodian], ["Purchase cost", money(item.purchase)], ["Status", item.status],
+      ],
+    }));
+  const stoneOptions = allStoneOptions.filter((option) =>
+    ledger.stones.some((item) => item.id === option.value && item.status === "Available"),
+  );
+  const workshopOptions = eligibleWorkshops.map((item): DetailOption => ({
+    value: String(item.id), label: item.name, subtitle: "Workshop",
+    details: [["Services", item.type.replaceAll("_", " ")], ["Phone", item.phone], ["Address", item.address]],
+  }));
+  const providerOptions = eligibleProviders.map((item): DetailOption => ({
+    value: String(item.id), label: item.name, subtitle: "Workshop provider",
+    details: [["Speciality", item.specialty], ["Phone", item.phone], ["Workshop", eligibleWorkshops.find((workshop) => workshop.id === item.workshopId)?.name ?? "Not recorded"]],
+  }));
   return (
     <Dialog
       open={!!operation}
@@ -2770,45 +4175,144 @@ function OperationDialog({
                   recording.
                 </div>
               )}
-              {allowed && operation !== "sales-handover" && (
-                <label>
-                  Stone
-                  <input value={`${stone.id} · ${stone.type}`} readOnly />
-                </label>
+              {operation === "job" && (
+                  <label>
+                    Stone
+                    <DetailedSelect name="stoneId" options={stoneOptions} defaultValue={stone.id} required disabled={stoneLocked} placeholder="Select stone" />
+                  </label>
+                )}
+              {allowed && !["job", "sales-handover", "direct-sale", "jewellery-handover", "promotion-handover"].includes(operation) && (
+                <label>Stone<input value={`${stone.id} · ${stone.type}`} readOnly /></label>
+              )}
+              {operation === "direct-sale" && (
+                <>
+                  <label className="ops-full">
+                    Stone details
+                    <DetailedSelect name="stoneId" options={stoneOptions} defaultValue={stone.id} required disabled={stoneLocked} placeholder="Select stone" />
+                  </label>
+                  <label>
+                    Buyer
+                    <DetailedSelect
+                      name={buyerChoice === "__new__" ? "buyerChoice" : "buyerName"}
+                      value={buyerChoice}
+                      onValueChange={setBuyerChoice}
+                      required
+                      placeholder="Select buyer"
+                      options={[
+                        ...ledger.buyers.map((item) => ({ value: item.name, label: item.name, subtitle: "Buyer", details: [["Phone", item.phone], ["Email", item.email], ["Locality", item.locality], ["Notes", item.notes]] as Array<[string, string]> })),
+                        { value: "__new__", label: "+ Add a new buyer", subtitle: "Create buyer during this sale", details: [["Next step", "Enter the new buyer details below"]] },
+                      ]}
+                    />
+                  </label>
+                  {buyerChoice === "__new__" && <label>New buyer name<input name="buyerName" required placeholder="Person or business name" /></label>}
+                  <label>
+                    Buyer phone
+                    <input name="buyerPhone" type="tel" />
+                  </label>
+                  <label>
+                    Buyer email
+                    <input name="buyerEmail" type="email" />
+                  </label>
+                  <label>
+                    Buyer locality
+                    <input name="buyerLocality" />
+                  </label>
+                  <label>
+                    Final selling price · LKR
+                    <input
+                      name="finalPrice"
+                      type="number"
+                      min="1"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Sale date and time
+                    <input name="soldAt" type="datetime-local" required />
+                  </label>
+                  <label className="ops-full">
+                    Sale notes
+                    <textarea name="notes" rows={2} />
+                  </label>
+                </>
+              )}
+              {operation === "jewellery-handover" && (
+                <>
+                  <label className="ops-full">
+                    Stone
+                    <DetailedSelect name="stoneId" options={stoneOptions} defaultValue={stone.id} required disabled={stoneLocked} placeholder="Select stone" />
+                  </label>
+                  <label>
+                    Jewellery workshop
+                    <DetailedSelect name="workshopId" required placeholder="Select workshop" options={ledger.workshops.filter((workshop) => ["JEWELLERY", "ALL"].includes(workshop.type)).map((item) => ({ value: String(item.id), label: item.name, subtitle: "Jewellery workshop", details: [["Services", item.type], ["Phone", item.phone], ["Address", item.address]] }))} />
+                  </label>
+                  <label>Handover date and time<input name="handedOverAt" type="datetime-local" required /></label>
+                  <label>Deadline date<input name="deadline" type="date" required /></label>
+                  <label className="ops-full">Design and production instructions<textarea name="notes" rows={3} placeholder="Jewellery type, design, measurements and setting requirements" /></label>
+                </>
+              )}
+              {operation === "jewellery-receive" && (
+                <>
+                  <div className="ops-context ops-full">{activeJewelleryJob?.workshop} · due {activeJewelleryJob?.deadline}</div>
+                  <label>Jewellery type<input name="itemType" required placeholder="Ring, pendant, earrings…" /></label>
+                  <label>Metal<CategorySelect name="metalType" categoryKey="METAL" categories={ledger.categories} required placeholder="Select metal" refresh={refresh} /></label>
+                  <label>Purity / karats<CategorySelect name="metalPurity" categoryKey="METAL_PURITY" categories={ledger.categories} required placeholder="Select purity" refresh={refresh} /></label>
+                  <label>Metal weight · g<input name="metalWeight" type="number" min="0" step="0.001" /></label>
+                  <label>Total jewellery weight · g<input name="totalWeight" type="number" min="0" step="0.001" /></label>
+                  <label>Setting style<input name="settingStyle" placeholder="Prong, bezel, halo…" /></label>
+                  <label>Size / dimensions<input name="itemSize" /></label>
+                  <label className="ops-full">Jewellery description<textarea name="description" rows={2} /></label>
+                  <label className="ops-full">Receiving inspection notes<textarea name="receiveNotes" rows={2} /></label>
+                </>
+              )}
+              {operation === "jewellery-edit" && jewelleryProfile && (
+                <>
+                  <label>Jewellery type<input name="itemType" required defaultValue={jewelleryProfile.itemType} /></label>
+                  <label>Metal<CategorySelect name="metalType" categoryKey="METAL" categories={ledger.categories} defaultValue={jewelleryProfile.metalType === "Not recorded" ? "" : jewelleryProfile.metalType} placeholder="Select metal" refresh={refresh} /></label>
+                  <label>Purity / karats<CategorySelect name="metalPurity" categoryKey="METAL_PURITY" categories={ledger.categories} defaultValue={jewelleryProfile.metalPurity === "Not recorded" ? "" : jewelleryProfile.metalPurity} placeholder="Select purity" refresh={refresh} /></label>
+                  <label>Metal weight · g<input name="metalWeight" type="number" min="0" step="0.001" defaultValue={jewelleryProfile.metalWeight || ""} /></label>
+                  <label>Total weight · g<input name="totalWeight" type="number" min="0" step="0.001" defaultValue={jewelleryProfile.totalWeight || ""} /></label>
+                  <label>Setting style<input name="settingStyle" defaultValue={jewelleryProfile.settingStyle === "Not recorded" ? "" : jewelleryProfile.settingStyle} /></label>
+                  <label>Size / dimensions<input name="itemSize" defaultValue={jewelleryProfile.itemSize === "Not recorded" ? "" : jewelleryProfile.itemSize} /></label>
+                  <label className="ops-full">Description<textarea name="description" rows={3} defaultValue={jewelleryProfile.description} /></label>
+                </>
+              )}
+              {operation === "promotion-handover" && (
+                <>
+                  <label className="ops-full">
+                    Stone / jewellery
+                    <DetailedSelect name="stoneId" defaultValue={stone.id} required disabled={stoneLocked} placeholder="Select stone or jewellery" options={ledger.stones.filter((item) => ["Available", "Jewellery"].includes(item.status) && !ledger.promotionHandovers.some((handover) => handover.stoneId === item.id && handover.status === "With company")).map((item) => {
+                      const profile = ledger.jewelleryProfiles.find((record) => record.stoneId === item.id);
+                      return { ...allStoneOptions.find((option) => option.value === item.id)!, label: profile ? `${profile.id} · ${profile.itemType}` : `${item.productId} · ${item.type}`, images: profile?.images.map((image) => image.url) ?? item.images.map((image) => image.url) };
+                    })} />
+                  </label>
+                  <label>Company<DetailedSelect name="companyId" required placeholder="Select company" options={ledger.companies.map((item) => ({ value: String(item.id), label: item.name, subtitle: "Promotion company", details: [["Contact person", item.contactPerson], ["Phone", item.phone], ["Email", item.email], ["Address", item.address]] }))} /></label>
+                  <label>Handover date and time<input name="handedOverAt" type="datetime-local" required /></label>
+                  <label>Deadline date<input name="deadline" type="date" required /></label>
+                  <label className="ops-full">Handover notes<textarea name="notes" rows={2} /></label>
+                  <div className="ops-context ops-full">No costs or charges are recorded for promotional handovers.</div>
+                </>
+              )}
+              {operation === "promotion-return" && (
+                <>
+                  <div className="ops-context ops-full">{activePromotion?.company} · deadline {activePromotion?.deadline}</div>
+                  <label className="ops-full">Return inspection notes<textarea name="returnNotes" rows={3} /></label>
+                </>
               )}
               {operation === "sales-handover" && (
                 <>
                   <label className="ops-full">
                     Stone details
-                    <select name="stoneId" defaultValue={stone.id} required>
-                      {ledger.stones
-                        .filter((item) => item.status === "Available")
-                        .map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.productId} · {item.id} · {item.type} ·{" "}
-                            {item.weight.toFixed(2)} ct
-                          </option>
-                        ))}
-                    </select>
+                    <DetailedSelect name="stoneId" options={stoneOptions} defaultValue={stone.id} required disabled={stoneLocked} placeholder="Select stone" />
                   </label>
                   <label>
                     Salesman
-                    <input
+                    <DetailedSelect
                       name="salesman"
-                      list="salesman-options"
                       required
                       placeholder="Search salesman"
-                      autoComplete="off"
+                      options={ledger.salesmen.map((item) => ({ value: item.name, label: item.name, subtitle: "Salesman", details: [["Phone", item.phone], ["Email", item.email], ["Locality", item.locality], ["Notes", item.notes]] }))}
                     />
-                    <datalist id="salesman-options">
-                      {ledger.salesmen.map((salesman) => (
-                        <option key={salesman.id} value={salesman.name}>
-                          {[salesman.locality, salesman.phone]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </option>
-                      ))}
-                    </datalist>
                   </label>
                   <label>
                     Quoted price · LKR
@@ -2816,7 +4320,6 @@ function OperationDialog({
                       name="price"
                       type="number"
                       min="1"
-                      defaultValue={stone.asking || ""}
                       required
                     />
                   </label>
@@ -2873,51 +4376,36 @@ function OperationDialog({
                 <>
                   <label>
                     Process
-                    <select
+                    <DetailedSelect
                       name="kind"
                       value={jobKind}
-                      onChange={(event) =>
-                        setJobKind(
-                          event.target.value as "Cutting" | "Treatment",
-                        )
-                      }
-                    >
-                      <option>Cutting</option>
-                      <option>Treatment</option>
-                    </select>
+                      onValueChange={(next) => setJobKind(next as "Cutting" | "Treatment")}
+                      options={[
+                        { value: "Cutting", label: "Cutting", subtitle: "Workshop process", details: [["Purpose", "Cut, shape or polish the stone"]] },
+                        { value: "Treatment", label: "Treatment", subtitle: "Workshop process", details: [["Purpose", "Apply or assess a gemstone treatment"]] },
+                      ]}
+                    />
                   </label>
                   <label>
                     Workshop
-                    <select
+                    <DetailedSelect
                       name="workshopId"
                       required
                       value={selectedWorkshop}
-                      onChange={(event) => setJobWorkshop(event.target.value)}
-                    >
-                      {eligibleWorkshops.map((workshop) => (
-                        <option key={workshop.id} value={workshop.id}>
-                          {workshop.name}
-                        </option>
-                      ))}
-                    </select>
+                      onValueChange={setJobWorkshop}
+                      options={workshopOptions}
+                      placeholder="Select workshop"
+                    />
                   </label>
                   <label>
                     Provider
-                    <select
+                    <DetailedSelect
                       key={`${jobKind}-${selectedWorkshop}`}
                       name="providerId"
                       required
-                      defaultValue=""
-                    >
-                      <option value="" disabled>
-                        Select provider
-                      </option>
-                      {eligibleProviders.map((provider) => (
-                        <option key={provider.id} value={provider.id}>
-                          {provider.name}
-                        </option>
-                      ))}
-                    </select>
+                      options={providerOptions}
+                      placeholder="Select provider"
+                    />
                   </label>
                   <label>
                     Handover date
@@ -2999,11 +4487,7 @@ function OperationDialog({
                   {openJobs[0]?.kind === "Treatment" && (
                     <label>
                       Treatment disclosure
-                      <input
-                        name="treatment"
-                        required
-                        placeholder="e.g. Heated · dealer disclosed"
-                      />
+                      <CategorySelect name="treatment" categoryKey="TREATMENT" categories={ledger.categories} required placeholder="Select treatment disclosure" refresh={refresh} />
                     </label>
                   )}
                   <label className="ops-full">
@@ -3043,15 +4527,7 @@ function OperationDialog({
                 <>
                   <label>
                     Assessment / disclosure
-                    <select name="outcome" defaultValue={stone.treatment}>
-                      <option>Not assessed</option>
-                      <option>No treatment declared</option>
-                      <option>Heated · dealer disclosed</option>
-                      <option>Oiled · dealer disclosed</option>
-                      <option>Fracture filled · dealer disclosed</option>
-                      <option>No indication of heat · laboratory report</option>
-                      <option>Treatment undetermined</option>
-                    </select>
+                    <CategorySelect name="outcome" categoryKey="TREATMENT" categories={ledger.categories} defaultValue={stone.treatment} placeholder="Select assessment" refresh={refresh} />
                   </label>
                   <label>
                     Laboratory report reference
@@ -3090,28 +4566,6 @@ function OperationDialog({
                   />
                 </label>
               )}
-              {operation === "price" && (
-                <>
-                  <div className="ops-context">
-                    Current asking price:{" "}
-                    {stone.asking ? money(stone.asking) : "Not set"}
-                  </div>
-                  <label>
-                    New asking price · LKR
-                    <input
-                      name="asking"
-                      type="number"
-                      min="1"
-                      defaultValue={stone.asking || ""}
-                      required
-                    />
-                  </label>
-                  <label>
-                    Reason
-                    <input name="reason" placeholder="Pricing review" />
-                  </label>
-                </>
-              )}
               {operation === "reserve" && (
                 <>
                   <label>
@@ -3124,7 +4578,6 @@ function OperationDialog({
                       type="number"
                       name="price"
                       min="1"
-                      defaultValue={stone.asking || ""}
                       required
                     />
                   </label>
@@ -3177,7 +4630,7 @@ function OperationDialog({
                       type="number"
                       min="1"
                       required
-                      defaultValue={reservation?.price || stone.asking || ""}
+                      defaultValue={reservation?.price || ""}
                     />
                   </label>
                   <label>
@@ -3217,11 +4670,7 @@ function OperationDialog({
                   </label>
                   <label>
                     Payment method
-                    <select name="method">
-                      <option>Bank transfer</option>
-                      <option>Cash</option>
-                      <option>Card</option>
-                    </select>
+                    <CategorySelect name="method" categoryKey="PAYMENT_METHOD" categories={ledger.categories} defaultValue="Bank transfer" placeholder="Select payment method" refresh={refresh} />
                   </label>
                 </>
               )}

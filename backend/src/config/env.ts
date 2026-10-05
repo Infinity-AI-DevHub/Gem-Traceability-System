@@ -5,8 +5,8 @@ const schema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
-  PORT: z.coerce.number().int().positive().default(4000),
-  FRONTEND_ORIGIN: z.string().url().default("http://127.0.0.1:5173"),
+  PORT: z.coerce.number().int().positive().default(4500),
+  FRONTEND_ORIGIN: z.string().url().default("http://127.0.0.1:3500"),
   DB_HOST: z.string().min(1).default("127.0.0.1"),
   DB_PORT: z.coerce.number().int().positive().default(3306),
   DB_NAME: z.string().min(1).default("origin_gemstone"),

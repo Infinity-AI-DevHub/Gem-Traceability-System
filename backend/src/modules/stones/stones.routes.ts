@@ -7,6 +7,7 @@ import {
   addStoneImages,
   editStone,
   intakeStone,
+  intakeStoneBatch,
   listStonesQuery,
   placeHold,
   transferCustody,
@@ -17,10 +18,12 @@ import {
   holdStone,
   moveStone,
   receiveStone,
+  receiveStones,
 } from "./stones.service.js";
 import { HttpError } from "../../lib/http-error.js";
 import { pool } from "../../database/pool.js";
 import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
+import { addEvent } from "../events/events.repository.js";
 
 export const stonesRouter = Router();
 
@@ -38,9 +41,22 @@ stonesRouter.get(
 stonesRouter.post(
   "/",
   asyncHandler(async (request, response) => {
+    const performedBy = String(response.locals.auditUser?.name ?? "System");
     response
       .status(201)
-      .json({ data: await receiveStone(intakeStone.parse(request.body)) });
+      .json({ data: await receiveStone(intakeStone.parse(request.body), performedBy) });
+  }),
+);
+
+stonesRouter.post(
+  "/batch",
+  asyncHandler(async (request, response) => {
+    const performedBy = String(response.locals.auditUser?.name ?? "System");
+    const input = intakeStoneBatch.parse(request.body);
+    const created = await receiveStones(input.stones, performedBy);
+    response.status(201).json({
+      data: { ids: created.map((stone) => stone.id), count: created.length },
+    });
   }),
 );
 
@@ -48,8 +64,9 @@ stonesRouter.patch(
   "/:stoneId",
   asyncHandler(async (request, response) => {
     const id = stoneId.parse(request.params.stoneId);
+    const performedBy = String(response.locals.auditUser?.name ?? "System");
     response.json({
-      data: await editStoneRecord(id, editStone.parse(request.body)),
+      data: await editStoneRecord(id, editStone.parse(request.body), performedBy),
     });
   }),
 );
@@ -86,6 +103,19 @@ stonesRouter.post(
         ],
       );
     }
+    await addEvent(pool, {
+      stoneId: id,
+      eventType: "IMAGE_UPLOAD",
+      title: `${input.images.length} stone image${input.images.length === 1 ? "" : "s"} added`,
+      details: {
+        detail: "Stone reference gallery updated.",
+        performedBy: String(response.locals.auditUser?.name ?? "System"),
+        uploaded: input.images.map((image, index) => ({
+          position: Number(rows[0]?.total ?? 0) + index + 1,
+          source: image.captured ? "Camera" : "File upload",
+        })),
+      },
+    });
     response.status(201).json({ data: { uploaded: input.images.length } });
   }),
 );
@@ -97,12 +127,29 @@ stonesRouter.delete(
     const imageId = Number(request.params.imageId);
     if (!Number.isInteger(imageId) || imageId < 1)
       throw new HttpError(422, "Invalid image ID");
+    const [images] = await pool.execute<RowDataPacket[]>(
+      "SELECT mime_type,captured,sort_order FROM stone_images WHERE id=? AND stone_id=? LIMIT 1",
+      [imageId, id],
+    );
     const [result] = await pool.execute<ResultSetHeader>(
       "DELETE FROM stone_images WHERE id=? AND stone_id=?",
       [imageId, id],
     );
     if (result.affectedRows !== 1)
       throw new HttpError(404, "Stone image was not found");
+    await addEvent(pool, {
+      stoneId: id,
+      eventType: "IMAGE_REMOVAL",
+      title: "Stone image removed",
+      details: {
+        detail: `Reference image ${imageId} removed from the stone gallery.`,
+        performedBy: String(response.locals.auditUser?.name ?? "System"),
+        imageId,
+        mimeType: images[0]?.mime_type ?? null,
+        captured: Boolean(images[0]?.captured),
+        position: Number(images[0]?.sort_order ?? 0) + 1,
+      },
+    });
     response.status(204).send();
   }),
 );
@@ -133,7 +180,7 @@ stonesRouter.post(
     const id = stoneId.parse(request.params.stoneId);
     response
       .status(201)
-      .json({ data: await moveStone(id, transferCustody.parse(request.body)) });
+      .json({ data: await moveStone(id, transferCustody.parse(request.body), String(response.locals.auditUser?.name ?? "System")) });
   }),
 );
 
@@ -143,7 +190,7 @@ stonesRouter.post(
     const id = stoneId.parse(request.params.stoneId);
     response
       .status(201)
-      .json({ data: await holdStone(id, placeHold.parse(request.body)) });
+      .json({ data: await holdStone(id, placeHold.parse(request.body), String(response.locals.auditUser?.name ?? "System")) });
   }),
 );
 
@@ -152,7 +199,7 @@ stonesRouter.post(
   asyncHandler(async (request, response) => {
     const id = stoneId.parse(request.params.stoneId);
     response.json({
-      data: await clearStoneHold(id, placeHold.parse(request.body)),
+      data: await clearStoneHold(id, placeHold.parse(request.body), String(response.locals.auditUser?.name ?? "System")),
     });
   }),
 );

@@ -13,7 +13,7 @@ const selectStone = `SELECT
   s.id, s.product_id AS productId, s.qr_token AS qrToken,
   s.gem_type AS gemType, s.origin, s.current_weight AS currentWeight,
   s.intake_weight AS intakeWeight, s.color, s.shape, s.cut_style AS cutStyle, s.purchase_cost AS purchaseCost,
-  s.asking_price AS askingPrice, s.status, s.location_id AS locationId,
+  s.status, s.location_id AS locationId,
   s.custodian_contact_id AS custodianContactId, s.treatment_disclosure AS treatmentDisclosure,
   s.certificate_reference AS certificateReference, s.seller_contact_id AS sellerContactId,
   s.seller_id AS sellerId,

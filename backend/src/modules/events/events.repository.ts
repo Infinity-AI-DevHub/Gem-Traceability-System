@@ -1,5 +1,6 @@
 import type { PoolConnection, RowDataPacket } from "mysql2/promise";
 import { pool } from "../../database/pool.js";
+import type { StoneRow } from "../../types/domain.js";
 
 type Queryable = Pick<PoolConnection, "execute">;
 
@@ -22,6 +23,40 @@ export async function addEvent(
       JSON.stringify(input.details),
       input.actorContactId ?? null,
     ],
+  );
+}
+
+export function stoneSnapshot(stone: StoneRow & Partial<RowDataPacket>) {
+  return {
+    productId: stone.productId,
+    gemType: stone.gemType,
+    origin: stone.origin,
+    currentWeight: Number(stone.currentWeight),
+    intakeWeight: Number(stone.intakeWeight),
+    color: stone.color,
+    shape: stone.shape,
+    cutStyle: stone.cutStyle ?? null,
+    purchaseCost: Number(stone.purchaseCost),
+    status: stone.status,
+    location: stone.locationName ?? null,
+    custodian: stone.custodianName ?? null,
+    treatmentDisclosure: stone.treatmentDisclosure,
+    certificateReference: stone.certificateReference,
+    seller: stone.sellerName ?? null,
+    acquiredOn: stone.acquiredOn,
+    notes: stone.notes,
+    version: Number(stone.version),
+  };
+}
+
+export function changedValues(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+) {
+  return Object.fromEntries(
+    Object.keys(after)
+      .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]))
+      .map((key) => [key, { from: before[key] ?? null, to: after[key] ?? null }]),
   );
 }
 
