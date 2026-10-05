@@ -43,3 +43,4 @@ outputs/
 work/
 backend/uploads/*
 !backend/uploads/.gitkeep
+db.sql
