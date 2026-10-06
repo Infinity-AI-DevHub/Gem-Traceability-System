@@ -2371,6 +2371,7 @@ function StoneDetail({
 
 const categoryLabels: Record<CategoryKey, string> = {
   GEM_TYPE: "Gem types",
+  ORIGIN: "Origins & localities",
   SHAPE: "Shapes",
   CUT: "Cut types",
   COLOR: "Colours",
@@ -2658,7 +2659,7 @@ function BatchIntake({ sellers, categories, refresh, save, cancel }: {
             <div className="batch-stone-fields">
               <label>Gem type *<CategorySelect name={field("type", row)} categoryKey="GEM_TYPE" categories={categories} required placeholder="Select gem type" refresh={refresh} /></label>
               <label>Weight · ct *<input name={field("weight", row)} type="number" min="0.001" step="0.001" required placeholder="0.000" /></label>
-              <label>Origin / locality *<input name={field("origin", row)} required placeholder="e.g. Ratnapura" /></label>
+              <label>Origin / locality *<CategorySelect name={field("origin", row)} categoryKey="ORIGIN" categories={categories} required placeholder="Select origin or locality" refresh={refresh} /></label>
               <label>Supplier<DetailedSelect name={field("seller", row)} placeholder="No supplier selected" options={sellers.map((item) => ({ value: String(item.id), label: item.name, subtitle: "Supplier", images: item.images.map((image) => image.url), details: [["Phone", item.phone], ["Email", item.email], ["Locality", item.locality], ["Notes", item.notes]] }))} /></label>
               <label>Purchase date<input name={field("date", row)} type="date" defaultValue={today()} /></label>
               <label>Purchase cost · LKR<input name={field("purchase", row)} type="number" min="0" defaultValue="0" /></label>
@@ -2827,12 +2828,16 @@ function Intake({
           </label>
           <label>
             Origin / locality *
-            <input
+            <CategorySelect
               name="origin"
+              categoryKey="ORIGIN"
+              categories={categories}
               required
-              defaultValue={stone?.origin}
-              placeholder="e.g. Ratnapura"
+              defaultValue={stone?.origin ?? ""}
+              placeholder="Select origin or locality"
+              refresh={refresh}
             />
+            <small>Select an origin or use + to create one.</small>
           </label>
           <label>
             Seller / source

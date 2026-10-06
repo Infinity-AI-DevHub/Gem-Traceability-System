@@ -188,6 +188,7 @@ export type Contact = {
 };
 export type CategoryKey =
   | "GEM_TYPE"
+  | "ORIGIN"
   | "SHAPE"
   | "CUT"
   | "COLOR"

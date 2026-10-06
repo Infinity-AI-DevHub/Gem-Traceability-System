@@ -59,6 +59,7 @@ const salesman = seller;
 const buyer = seller;
 const categoryKey = z.enum([
   "GEM_TYPE",
+  "ORIGIN",
   "SHAPE",
   "CUT",
   "COLOR",
