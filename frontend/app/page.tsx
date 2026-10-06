@@ -442,6 +442,7 @@ export default function Home({
     [stoneLocked, setStoneLocked] = useState(false),
     [notice, setNotice] = useState(""),
     [menu, setMenu] = useState(false),
+    [sidebarCollapsed, setSidebarCollapsed] = useState(false),
     [search, setSearch] = useState(""),
     [counted, setCounted] = useState<string[]>([]),
     [editing, setEditing] = useState<string | null>(initialEditing || null),
@@ -452,6 +453,7 @@ export default function Home({
     [pushState, setPushState] = useState<
       "checking" | "on" | "off" | "blocked" | "unsupported" | "unavailable"
     >("checking");
+  const toggleSidebar = () => setSidebarCollapsed((current) => !current);
   const stone =
     ledger.stones.find((s) => s.id === selected) || ledger.stones[0];
   const fail = (error: unknown, fallback: string) => {
@@ -869,11 +871,20 @@ export default function Home({
           onClick={() => setMenu(false)}
         />
       )}
-      <aside className={`sidebar ${menu ? "sidebar-open" : ""}`}>
+      <aside className={`sidebar ${menu ? "sidebar-open" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
         <div className="side-head">
           <Brand />
-          <button onClick={() => setMenu(false)} aria-label="Close navigation">
+          <button className="sidebar-close-button" onClick={() => setMenu(false)} aria-label="Close navigation">
             <X size={20} />
+          </button>
+          <button
+            className="sidebar-collapse-button"
+            onClick={toggleSidebar}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!sidebarCollapsed}
+          >
+            {sidebarCollapsed ? <ArrowRight size={18} /> : <ArrowLeft size={18} />}
           </button>
         </div>
         <nav>
@@ -887,6 +898,7 @@ export default function Home({
                   : ""
               }
               onClick={() => navigate(key)}
+              title={sidebarCollapsed ? label : undefined}
             >
               <Icon size={18} />
               <span>{label}</span>

@@ -343,22 +343,52 @@ button {
   padding: 27px 18px 18px;
   color: #fff;
   background: #14372f;
+  overflow: hidden;
+  transition: width 0.22s ease, padding 0.22s ease;
 }
 .side-head {
   padding: 0 12px 31px;
   display: flex;
   justify-content: space-between;
 }
-.side-head > button {
+.sidebar-close-button {
   display: none;
   background: none;
   border: 0;
   color: #fff;
 }
+.sidebar-collapse-button {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #ffffff20;
+  border-radius: 9px;
+  background: #ffffff0d;
+  color: #b9cbc5;
+}
+.sidebar-collapse-button:hover {
+  background: #ffffff18;
+  color: #fff;
+}
 .sidebar nav {
+  min-height: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #52746a transparent;
+}
+.sidebar nav::-webkit-scrollbar {
+  width: 5px;
+}
+.sidebar nav::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #52746a;
 }
 .sidebar nav > p {
   margin: 8px 12px 10px;
@@ -457,6 +487,52 @@ button {
   min-width: 0;
   width: calc(100% - 250px);
   margin-left: 250px;
+  transition: width 0.22s ease, margin-left 0.22s ease;
+}
+.sidebar.sidebar-collapsed {
+  width: 76px;
+  padding-inline: 10px;
+}
+.sidebar-collapsed .side-head {
+  padding-inline: 5px;
+  align-items: center;
+  flex-direction: column;
+  gap: 18px;
+}
+.sidebar-collapsed .mark {
+  justify-content: center;
+}
+.sidebar-collapsed .mark span,
+.sidebar-collapsed nav > p,
+.sidebar-collapsed nav button > span,
+.sidebar-collapsed .profile > div {
+  display: none;
+}
+.sidebar-collapsed nav button {
+  justify-content: center;
+  padding-inline: 8px;
+}
+.sidebar-collapsed nav button.active:before {
+  left: -10px;
+}
+.sidebar-collapsed nav button b {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  width: 17px;
+  height: 17px;
+  font-size: 9px;
+}
+.sidebar-collapsed .profile {
+  grid-template-columns: 1fr;
+  justify-items: center;
+}
+.sidebar-collapsed .profile button {
+  padding: 7px;
+}
+.sidebar.sidebar-collapsed + .workspace {
+  width: calc(100% - 76px);
+  margin-left: 76px;
 }
 .topbar {
   height: 70px;
@@ -2109,11 +2185,50 @@ form[aria-busy="true"] button:not(:disabled) {
     transform: translateX(-105%);
     transition: transform 0.25s;
   }
+  .sidebar.sidebar-collapsed {
+    width: auto;
+    padding: 27px 18px 18px;
+  }
+  .sidebar.sidebar-collapsed + .workspace {
+    width: 100%;
+    margin-left: 0;
+  }
+  .sidebar-collapsed .side-head {
+    padding: 0 12px 31px;
+    flex-direction: row;
+    gap: 0;
+  }
+  .sidebar-collapsed .mark span,
+  .sidebar-collapsed nav > p,
+  .sidebar-collapsed nav button > span {
+    display: initial;
+  }
+  .sidebar-collapsed .profile > div {
+    display: flex;
+  }
+  .sidebar-collapsed nav button {
+    justify-content: flex-start;
+    padding: 11px 12px;
+  }
+  .sidebar-collapsed nav button b {
+    position: static;
+    width: 21px;
+    height: 21px;
+    margin-left: auto;
+    font-size: 11px;
+  }
+  .sidebar-collapsed .profile {
+    grid-template-columns: auto 1fr auto;
+    justify-items: stretch;
+  }
   .sidebar-open {
     transform: translateX(0);
   }
-  .side-head > button {
+  .sidebar-close-button {
     display: block;
+  }
+  .sidebar-collapse-button {
+    display: none;
   }
   .nav-scrim {
     display: block;
@@ -3977,6 +4092,7 @@ form[aria-busy="true"] button:not(:disabled) {
     grid-template-columns: 1fr 1fr;
     gap: 5px;
     padding: 10px 14px;
+    overflow: visible;
   }
   .sidebar nav > p {
     grid-column: 1/-1;
