@@ -26,6 +26,7 @@ import { pool } from "../../database/pool.js";
 import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { addEvent } from "../events/events.repository.js";
 import { removeStoredImage, storeImage } from "../../lib/image-storage.js";
+import { randomUUID } from "node:crypto";
 
 export const stonesRouter = Router();
 
@@ -46,12 +47,10 @@ stonesRouter.post(
     const performedBy = String(response.locals.auditUser?.name ?? "System");
     const userId = Number(response.locals.auditUser?.id);
     const requestKeyHeader = request.get("Idempotency-Key");
-    const requestKey = z.uuid().safeParse(requestKeyHeader);
-    if (!requestKey.success)
-      throw new HttpError(
-        400,
-        "This page is out of date. Refresh it, then register the stone again.",
-      );
+    const parsedRequestKey = z.uuid().safeParse(requestKeyHeader);
+    const requestKey = parsedRequestKey.success
+      ? parsedRequestKey.data
+      : randomUUID();
     response
       .status(201)
       .json({
@@ -59,7 +58,7 @@ stonesRouter.post(
           intakeStone.parse(request.body),
           performedBy,
           userId,
-          requestKey.data,
+          requestKey,
         ),
       });
   }),
