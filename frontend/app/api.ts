@@ -14,7 +14,22 @@ export type AppNotification = {
   createdAt: string;
 };
 
-function friendlyError(status: number, serverMessage?: string) {
+type ErrorDetails = {
+  fieldErrors?: Record<string, string[]>;
+  formErrors?: string[];
+};
+
+function firstValidationMessage(details?: ErrorDetails) {
+  const formMessage = details?.formErrors?.find(Boolean);
+  if (formMessage) return formMessage;
+  for (const messages of Object.values(details?.fieldErrors ?? {})) {
+    const message = messages?.find(Boolean);
+    if (message) return message;
+  }
+  return "";
+}
+
+function friendlyError(status: number, serverMessage?: string, details?: ErrorDetails) {
   if (status === 401) return "Your session has ended. Please sign in again.";
   if (status === 403) return "You do not have permission to do that.";
   if (status === 404) return "We could not find that item. It may have been removed.";
@@ -23,7 +38,7 @@ function friendlyError(status: number, serverMessage?: string) {
   if (status === 413) return "That file is too large. Please choose a smaller file.";
   if (status === 422)
     return serverMessage === "Validation failed"
-      ? "Please check the information you entered and try again."
+      ? firstValidationMessage(details) || "Please check the information you entered and try again."
       : serverMessage || "Please check the information you entered.";
   if (status === 429) return "Too many tries. Please wait a little while and try again.";
   if (status >= 500)
@@ -48,7 +63,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       "We could not connect. Check your internet connection and try again.",
     );
   }
-  let body: { data?: T; error?: string } | null = null;
+  let body: { data?: T; error?: string; details?: ErrorDetails } | null = null;
   if (response.status !== 204) {
     try {
       body = await response.json();
@@ -64,7 +79,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     window.dispatchEvent(new Event("origin:unauthorized"));
   }
   if (!response.ok)
-    throw new Error(friendlyError(response.status, body?.error));
+    throw new Error(friendlyError(response.status, body?.error, body?.details));
   return body?.data as T;
 }
 

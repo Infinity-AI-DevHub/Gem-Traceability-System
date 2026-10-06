@@ -45,7 +45,13 @@ stonesRouter.post(
   asyncHandler(async (request, response) => {
     const performedBy = String(response.locals.auditUser?.name ?? "System");
     const userId = Number(response.locals.auditUser?.id);
-    const requestKey = z.uuid().parse(request.get("Idempotency-Key"));
+    const requestKeyHeader = request.get("Idempotency-Key");
+    const requestKey = z.uuid().safeParse(requestKeyHeader);
+    if (!requestKey.success)
+      throw new HttpError(
+        400,
+        "This page is out of date. Refresh it, then register the stone again.",
+      );
     response
       .status(201)
       .json({
@@ -53,7 +59,7 @@ stonesRouter.post(
           intakeStone.parse(request.body),
           performedBy,
           userId,
-          requestKey,
+          requestKey.data,
         ),
       });
   }),
