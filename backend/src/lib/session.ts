@@ -3,7 +3,11 @@ import { env } from "../config/env.js";
 
 export const sessionCookieName =
   env.NODE_ENV === "production" ? "__Host-origin_session" : "origin_session";
-export const sessionHours = 8;
+// Browsers may enforce their own cookie lifetime limits, but the application
+// does not expire an authenticated session on a timer. Each session remains
+// valid until the user signs out, changes their password from another session,
+// or an administrator revokes it.
+export const sessionMaxAgeSeconds = 60 * 60 * 24 * 365 * 10;
 
 export const hashSessionToken = (token: string) =>
   createHash("sha256").update(token).digest("hex");
@@ -36,7 +40,7 @@ export function readSessionToken(request: {
 }
 
 export const createSessionCookie = (token: string, clear = false) =>
-  `${sessionCookieName}=${clear ? "" : encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${clear ? 0 : 60 * 60 * sessionHours}${env.NODE_ENV === "production" ? "; Secure" : ""}`;
+  `${sessionCookieName}=${clear ? "" : encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${clear ? 0 : sessionMaxAgeSeconds}${env.NODE_ENV === "production" ? "; Secure" : ""}`;
 
 export const clearLegacySessionCookie = () =>
   "origin_session=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0";

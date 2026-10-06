@@ -100,6 +100,11 @@ export const api = {
   logout: async () => {
     await request<never>("/auth/logout", { method: "POST" });
   },
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ changed: true }>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
   notifications: () =>
     request<{ unreadCount: number; items: AppNotification[] }>(
       "/notifications",

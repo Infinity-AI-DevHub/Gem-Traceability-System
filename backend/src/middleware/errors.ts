@@ -15,6 +15,7 @@ const validationMessages: Record<string, string> = {
   locationName: "Enter a receiving location.",
   images: "Check the stone images and try again.",
   sellerImages: "Check the supplier images and try again.",
+  currentPassword: "Enter your current password.",
 };
 
 function readableValidationError(error: ZodError) {
@@ -22,6 +23,7 @@ function readableValidationError(error: ZodError) {
   const field = issue?.path.find((part) => typeof part === "string");
   if (typeof field === "string" && validationMessages[field])
     return validationMessages[field];
+  if (field === "newPassword" && issue?.message) return issue.message;
   if (issue?.message === "A receiving location is required")
     return "Enter a receiving location.";
   return "Please check the highlighted information and try again.";

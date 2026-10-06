@@ -19,6 +19,7 @@ import {
   History,
   ImagePlus,
   LayoutDashboard,
+  KeyRound,
   LogOut,
   Menu,
   Pencil,
@@ -109,6 +110,35 @@ const pageRoutes: Record<Exclude<Page, "stone">, string> = {
   contacts: "/directory",
   categories: "/categories",
 };
+
+function routeFromPath(pathname: string, ledger: Ledger) {
+  const decoded = decodeURIComponent(pathname);
+  const stoneEdit = decoded.match(/^\/stones\/([^/]+)\/edit$/);
+  if (stoneEdit)
+    return { page: "intake" as Page, stoneId: stoneEdit[1], editing: stoneEdit[1] };
+  const stoneDetail = decoded.match(/^\/stones\/([^/]+)$/);
+  if (stoneDetail)
+    return { page: "stone" as Page, stoneId: stoneDetail[1], editing: null };
+  const jewelleryDetail = decoded.match(/^\/jewellery\/([^/]+)$/);
+  if (jewelleryDetail) {
+    const profile = ledger.jewelleryProfiles.find(
+      (item) => item.id === jewelleryDetail[1],
+    );
+    return {
+      page: "jewellery" as Page,
+      stoneId: profile?.stoneId ?? "",
+      editing: null,
+    };
+  }
+  const staticPage = Object.entries(pageRoutes).find(
+    ([, path]) => path === decoded,
+  )?.[0] as Exclude<Page, "stone"> | undefined;
+  return {
+    page: (staticPage ?? "dashboard") as Page,
+    stoneId: "",
+    editing: null,
+  };
+}
 const nav = [
   ["dashboard", "Command centre", LayoutDashboard],
   ["inventory", "Stone register", Gem],
@@ -449,6 +479,8 @@ export default function Home({
     [notifications, setNotifications] = useState<AppNotification[]>([]),
     [notificationOpen, setNotificationOpen] = useState(false),
     [devicePromptOpen, setDevicePromptOpen] = useState(false),
+    [passwordOpen, setPasswordOpen] = useState(false),
+    [passwordSaving, setPasswordSaving] = useState(false),
     [savedDevice, setSavedDevice] = useState(false),
     [pushState, setPushState] = useState<
       "checking" | "on" | "off" | "blocked" | "unsupported" | "unavailable"
@@ -474,7 +506,8 @@ export default function Home({
     let active = true;
     void (async () => {
       try {
-        await api.session();
+        // The ledger endpoint already verifies the secure session. A separate
+        // session request doubled the wait on every fresh page load.
         const data = await api.ledger();
         if (!active) return;
         setLedger(data);
@@ -488,7 +521,11 @@ export default function Home({
           );
           if (converted) {
             setPage("jewellery");
-            router.replace(`/jewellery/${encodeURIComponent(converted.id)}`);
+            window.history.replaceState(
+              null,
+              "",
+              `/jewellery/${encodeURIComponent(converted.id)}`,
+            );
           }
         }
         setLoggedIn(true);
@@ -518,6 +555,18 @@ export default function Home({
     return () =>
       window.removeEventListener("origin:unauthorized", unauthorized);
   }, [router]);
+  useEffect(() => {
+    const syncFromBrowserHistory = () => {
+      const destination = routeFromPath(window.location.pathname, ledger);
+      setPage(destination.page);
+      if (destination.stoneId) setSelected(destination.stoneId);
+      setEditing(destination.editing);
+      setMenu(false);
+      setSearch("");
+    };
+    window.addEventListener("popstate", syncFromBrowserHistory);
+    return () => window.removeEventListener("popstate", syncFromBrowserHistory);
+  }, [ledger]);
   useEffect(() => {
     if (!loggedIn) return;
     let active = true;
@@ -575,13 +624,13 @@ export default function Home({
     setMenu(false);
     setSearch("");
     setEditing(null);
-    router.push(
-      nextPage === "jewellery" && id
+    const url = nextPage === "jewellery" && id
         ? `/jewellery/${encodeURIComponent(jewellery?.id ?? id)}`
         : nextPage === "stone" && id
           ? `/stones/${encodeURIComponent(id)}`
-          : pageRoutes[nextPage as Exclude<Page, "stone">],
-    );
+          : pageRoutes[nextPage as Exclude<Page, "stone">];
+    window.history.pushState(null, "", url);
+    window.scrollTo({ top: 0, behavior: "auto" });
   };
   const edit = (id: string) => {
     setSelected(id);
@@ -589,7 +638,8 @@ export default function Home({
     setPage("intake");
     setMenu(false);
     setSearch("");
-    router.push(`/stones/${encodeURIComponent(id)}/edit`);
+    window.history.pushState(null, "", `/stones/${encodeURIComponent(id)}/edit`);
+    window.scrollTo({ top: 0, behavior: "auto" });
   };
   const open = (op: Operation, id?: string) => {
     const stoneId = id || stone?.id;
@@ -681,7 +731,15 @@ export default function Home({
         // Opening the destination is more important than blocking on read state.
       }
     }
-    router.push(item.actionUrl || "/dashboard");
+    const destination = item.actionUrl || "/dashboard";
+    if (destination.startsWith("/") && !destination.startsWith("//")) {
+      const route = routeFromPath(destination, ledger);
+      setPage(route.page);
+      if (route.stoneId) setSelected(route.stoneId);
+      setEditing(route.editing);
+      window.history.pushState(null, "", destination);
+      window.scrollTo({ top: 0, behavior: "auto" });
+    }
   };
   const markAllNotificationsRead = async () => {
     setNotifications((current) =>
@@ -861,6 +919,26 @@ export default function Home({
       fail(error, "We could not sign you out. Please try again.");
     }
   };
+  const changePassword = async (form: FormData) => {
+    if (passwordSaving) return;
+    const currentPassword = txt(form.get("currentPassword"));
+    const newPassword = txt(form.get("newPassword"));
+    const confirmation = txt(form.get("confirmPassword"));
+    if (newPassword !== confirmation) {
+      toast.error("The two new passwords do not match. Please enter them again.");
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      await api.changePassword(currentPassword, newPassword);
+      setPasswordOpen(false);
+      toast.success("Your password has been changed. You are still signed in on this device.");
+    } catch (error) {
+      fail(error, "We could not change your password. Please try again.");
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
   const actions = { navigate, open, edit, saveStone, download, flash };
   return (
     <div className="app-shell ops-shell">
@@ -917,6 +995,13 @@ export default function Home({
               <strong>Administrator</strong>
               <span>System administrator</span>
             </div>
+            <button
+              onClick={() => setPasswordOpen(true)}
+              title="Change password"
+              aria-label="Change password"
+            >
+              <KeyRound size={17} />
+            </button>
             <button
               onClick={() => void signOut()}
               title="Sign out"
@@ -1067,6 +1152,75 @@ export default function Home({
           error={operation ? notice : ""}
         />
       )}
+      <Dialog open={passwordOpen} onOpenChange={setPasswordOpen}>
+        <DialogContent className="account-dialog">
+          <DialogHeader>
+            <DialogTitle>Change your password</DialogTitle>
+            <DialogDescription>
+              Enter your current password, then choose a strong new one. You
+              will remain signed in after it changes.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="account-password-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void changePassword(new FormData(event.currentTarget));
+            }}
+          >
+            <label>
+              Current password
+              <input
+                name="currentPassword"
+                type="password"
+                autoComplete="current-password"
+                minLength={8}
+                maxLength={200}
+                disabled={passwordSaving}
+                required
+              />
+            </label>
+            <label>
+              New password
+              <input
+                name="newPassword"
+                type="password"
+                autoComplete="new-password"
+                minLength={14}
+                maxLength={200}
+                disabled={passwordSaving}
+                required
+              />
+              <small>Use at least 14 characters with uppercase, lowercase, a number and a symbol.</small>
+            </label>
+            <label>
+              Enter the new password again
+              <input
+                name="confirmPassword"
+                type="password"
+                autoComplete="new-password"
+                minLength={14}
+                maxLength={200}
+                disabled={passwordSaving}
+                required
+              />
+            </label>
+            <div className="account-dialog-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setPasswordOpen(false)}
+                disabled={passwordSaving}
+              >
+                Cancel
+              </button>
+              <button className="primary-button" disabled={passwordSaving}>
+                {passwordSaving ? "Changing password…" : "Change password"}
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
       <Dialog open={devicePromptOpen} onOpenChange={setDevicePromptOpen}>
         <DialogContent
           className="device-save-dialog"

@@ -81,7 +81,7 @@ ledgerRouter.get(
         "SELECT * FROM contacts WHERE active=TRUE ORDER BY display_name",
       ),
       pool.query<RowDataPacket[]>(
-        "SELECT id,stone_id,file_path,mime_type,TO_BASE64(image_data) image_base64,captured FROM stone_images ORDER BY sort_order,id",
+        "SELECT id,stone_id,file_path,mime_type,captured FROM stone_images WHERE file_path IS NOT NULL ORDER BY sort_order,id",
       ),
       pool.query<RowDataPacket[]>(
         "SELECT id,name,workshop_type,phone,address FROM workshops WHERE active=TRUE ORDER BY name",
@@ -93,7 +93,7 @@ ledgerRouter.get(
         "SELECT id,name,phone,email,locality,notes FROM sellers WHERE active=TRUE ORDER BY name",
       ),
       pool.query<RowDataPacket[]>(
-        "SELECT id,seller_id,file_path,mime_type,TO_BASE64(image_data) image_base64,captured FROM seller_images ORDER BY sort_order,id",
+        "SELECT id,seller_id,file_path,mime_type,captured FROM seller_images WHERE file_path IS NOT NULL ORDER BY sort_order,id",
       ),
       pool.query<RowDataPacket[]>(
         "SELECT id,name,phone,email,locality,notes FROM salesmen WHERE active=TRUE ORDER BY name",
@@ -117,7 +117,7 @@ ledgerRouter.get(
         "SELECT * FROM jewellery_profiles ORDER BY created_at DESC",
       ),
       pool.query<RowDataPacket[]>(
-        "SELECT id,jewellery_id,file_path,mime_type,TO_BASE64(image_data) image_base64,captured FROM jewellery_images ORDER BY sort_order,id",
+        "SELECT id,jewellery_id,file_path,mime_type,captured FROM jewellery_images WHERE file_path IS NOT NULL ORDER BY sort_order,id",
       ),
       pool.query<RowDataPacket[]>(
         "SELECT id,name,phone,email,address,contact_person FROM companies WHERE active=TRUE ORDER BY name",

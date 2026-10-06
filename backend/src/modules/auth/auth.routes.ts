@@ -12,14 +12,30 @@ import {
   createSessionCookie,
   hashSessionToken,
   readSessionToken,
-  sessionHours,
 } from "../../lib/session.js";
+import { requireAuth } from "../../middleware/auth.js";
 
 export const authRouter = Router();
 const credentials = z.object({
   username: z.string().trim().min(1).max(80),
   password: z.string().min(8).max(200),
 });
+const passwordChange = z
+  .object({
+    currentPassword: z.string().min(8).max(200),
+    newPassword: z
+      .string()
+      .min(14, "Your new password needs at least 14 characters")
+      .max(200)
+      .regex(/[a-z]/, "Add a lowercase letter to your new password")
+      .regex(/[A-Z]/, "Add an uppercase letter to your new password")
+      .regex(/\d/, "Add a number to your new password")
+      .regex(/[^A-Za-z0-9]/, "Add a symbol to your new password"),
+  })
+  .refine((value) => value.currentPassword !== value.newPassword, {
+    message: "Choose a new password that is different from your current password",
+    path: ["newPassword"],
+  });
 const failureLimit = 5;
 const blockMinutes = 15;
 const dummyPasswordHash = hashPassword("invalid-password-timing-placeholder");
@@ -124,13 +140,15 @@ authRouter.post(
 
     const token = randomBytes(32).toString("base64url");
     const id = hashSessionToken(token);
-    await pool.execute("DELETE FROM user_sessions WHERE expires_at <= NOW(3)");
+    await pool.execute(
+      "DELETE FROM user_sessions WHERE expires_at IS NOT NULL AND expires_at <= NOW(3)",
+    );
     await pool.execute(
       "DELETE FROM auth_login_limits WHERE updated_at < DATE_SUB(NOW(3), INTERVAL 1 DAY)",
     );
     await pool.execute<ResultSetHeader>(
       `INSERT INTO user_sessions (id,user_id,expires_at)
-       VALUES (?,?,DATE_ADD(NOW(3), INTERVAL ${sessionHours} HOUR))`,
+       VALUES (?,?,NULL)`,
       [id, user.id],
     );
     await pool.execute(
@@ -167,7 +185,7 @@ authRouter.get(
     const [rows] = await pool.execute<RowDataPacket[]>(
       `SELECT u.username,u.display_name,u.role
        FROM user_sessions s JOIN users u ON u.id=s.user_id
-       WHERE s.id=? AND s.expires_at>NOW(3) AND u.active=TRUE LIMIT 1`,
+       WHERE s.id=? AND (s.expires_at IS NULL OR s.expires_at>NOW(3)) AND u.active=TRUE LIMIT 1`,
       [id],
     );
     const user = rows[0];
@@ -182,6 +200,36 @@ authRouter.get(
         role: user.role,
       },
     });
+  }),
+);
+
+authRouter.post(
+  "/change-password",
+  requireAuth,
+  asyncHandler(async (request, response) => {
+    setNoStore(response);
+    const input = passwordChange.parse(request.body);
+    const userId = Number(response.locals.auditUser?.id);
+    if (!userId) throw new HttpError(401, "Authentication required");
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      "SELECT username,password_hash FROM users WHERE id=? AND active=TRUE LIMIT 1",
+      [userId],
+    );
+    const user = rows[0];
+    if (!user || !verifyPassword(input.currentPassword, String(user.password_hash)))
+      throw new HttpError(422, "Your current password is not correct");
+    if (
+      input.newPassword
+        .toLocaleLowerCase("en-US")
+        .includes(String(user.username).toLocaleLowerCase("en-US"))
+    )
+      throw new HttpError(422, "Your new password must not contain your username");
+
+    await pool.execute(
+      "UPDATE users SET password_hash=?,failed_login_attempts=0,locked_until=NULL WHERE id=?",
+      [hashPassword(input.newPassword), userId],
+    );
+    response.json({ data: { changed: true } });
   }),
 );
 
