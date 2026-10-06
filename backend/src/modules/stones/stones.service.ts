@@ -170,6 +170,38 @@ export async function receiveStone(input: Intake, performedBy = "System") {
   return transaction((connection) => createStone(connection, input, performedBy));
 }
 
+export async function receiveStoneOnce(
+  input: Intake,
+  performedBy: string,
+  userId: number,
+  requestKey: string,
+) {
+  return transaction(async (connection) => {
+    try {
+      await connection.execute(
+        "INSERT INTO stone_intake_requests (user_id,request_key) VALUES (?,?)",
+        [userId, requestKey],
+      );
+    } catch (error) {
+      if ((error as { code?: string }).code !== "ER_DUP_ENTRY") throw error;
+      const [rows] = await connection.query<RowDataPacket[]>(
+        "SELECT stone_id FROM stone_intake_requests WHERE user_id=? AND request_key=? LIMIT 1",
+        [userId, requestKey],
+      );
+      const existingId = String(rows[0]?.stone_id ?? "");
+      if (!existingId)
+        throw new HttpError(409, "This stone is already being saved. Please wait.");
+      return requireStone(existingId, connection);
+    }
+    const created = await createStone(connection, input, performedBy);
+    await connection.execute(
+      "UPDATE stone_intake_requests SET stone_id=? WHERE user_id=? AND request_key=?",
+      [created.id, userId, requestKey],
+    );
+    return created;
+  });
+}
+
 export async function receiveStones(inputs: Intake[], performedBy = "System") {
   return transaction(async (connection) => {
     const created = [];

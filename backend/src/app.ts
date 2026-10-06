@@ -34,7 +34,12 @@ export function createApp() {
       origin: env.FRONTEND_ORIGIN,
       credentials: true,
       methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "Idempotency-Key",
+      ],
       maxAge: 600,
     }),
   );

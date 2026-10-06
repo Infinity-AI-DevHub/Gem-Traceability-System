@@ -686,6 +686,52 @@ button {
   min-height: 44px;
   padding: 0 17px;
 }
+.submission-progress {
+  display: grid;
+  flex: 0 0 100%;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  width: 100%;
+  border: 1px solid #c9ded5;
+  border-radius: 12px;
+  background: #eef7f3;
+  padding: 11px 13px;
+  color: #194f41;
+}
+.submission-progress > span {
+  font-size: 12px;
+  font-weight: 800;
+}
+.submission-progress > small {
+  color: #60766d;
+  font-size: 10px;
+}
+.submission-progress > div {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #d2e3dc;
+}
+.submission-progress > div > i {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1b5a49, #52a184);
+  animation: submission-progress 1.05s ease-in-out infinite;
+}
+form[aria-busy="true"] input,
+form[aria-busy="true"] select,
+form[aria-busy="true"] textarea,
+form[aria-busy="true"] summary,
+form[aria-busy="true"] label,
+form[aria-busy="true"] button:not(:disabled) {
+  pointer-events: none;
+}
+@keyframes submission-progress {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(245%); }
+}
 .notification-tools {
   padding: 10px 16px;
   border-bottom: 1px solid #edf0ec;
@@ -2928,6 +2974,7 @@ button {
 }
 .ops-form-footer {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
   border-top: 1px solid #e5e8e2;
@@ -3094,6 +3141,7 @@ button {
 }
 .ops-dialog-footer {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 9px;
   margin-top: 22px;
@@ -4283,7 +4331,7 @@ button:disabled { cursor: not-allowed; }
 .batch-photo-field .photo-actions { gap: 7px; }
 .batch-photo-field .photo-button { min-height: 38px; padding: 7px 9px; }
 .batch-intake-footer {
-  position: sticky; z-index: 12; bottom: 14px; display: flex; justify-content: flex-end; gap: 10px;
+  position: sticky; z-index: 12; bottom: 14px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px;
   padding: 14px; border: 1px solid #d9e3de; border-radius: 15px; background: rgb(255 255 255 / 92%);
   box-shadow: 0 12px 35px rgb(13 43 34 / 14%); backdrop-filter: blur(16px);
 }
@@ -4374,6 +4422,7 @@ button:disabled { cursor: not-allowed; }
   .device-save-actions button { width: 100%; padding-inline: 12px; }
   .intake-mode-switch { grid-template-columns: 1fr; }
   .batch-intake-footer { display: grid; grid-template-columns: .8fr 1.4fr; }
+  .batch-intake-footer .submission-progress { grid-column: 1/-1; }
   .dashboard-priority-list, .dashboard-operation-groups, .dashboard-expected-list { padding-inline: 14px; }
   .dashboard-priority { grid-template-columns: 34px minmax(0, 1fr); }
   .dashboard-priority > button { grid-column: 1/-1; grid-row: auto; justify-content: center; }

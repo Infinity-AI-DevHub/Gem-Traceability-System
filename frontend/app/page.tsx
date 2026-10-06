@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import QRCode from "react-qr-code";
 import { toast } from "sonner";
 import {
@@ -713,6 +713,7 @@ export default function Home({
     form: FormData,
     photos: PhotoDraft[],
     removedImageIds: number[],
+    requestKey: string,
   ) => {
     const type = txt(form.get("type")),
       origin = txt(form.get("origin")),
@@ -723,7 +724,7 @@ export default function Home({
         new Error("Gem type, origin and positive carat weight are required."),
         "Stone details are incomplete",
       );
-      return;
+      return false;
     }
     try {
       const payload = {
@@ -756,7 +757,7 @@ export default function Home({
             ...payload,
             expectedVersion: current.version,
           })
-        : await api.intake(payload);
+        : await api.intake(payload, requestKey);
       for (const imageId of removedImageIds) {
         await api.deleteStoneImage(result.id, imageId);
       }
@@ -774,8 +775,10 @@ export default function Home({
           ? `${result.id} updated and recorded in its lifecycle history.`
           : `${result.id} registered in MySQL.`,
       );
+      return true;
     } catch (error) {
       fail(error, "We could not register this stone. Please check the details and try again.");
+      return false;
     }
   };
   const saveStoneBatch = async (
@@ -1143,7 +1146,8 @@ type Actions = {
     form: FormData,
     photos: PhotoDraft[],
     removedImageIds: number[],
-  ) => void;
+    requestKey: string,
+  ) => Promise<boolean>;
   download: typeof download;
   flash: (m: string) => void;
 };
@@ -2591,6 +2595,16 @@ async function squarePhoto(file: File) {
 
 type BatchIntakeRow = { id: string };
 
+function SubmissionProgress({ label }: { label: string }) {
+  return (
+    <div className="submission-progress" role="status" aria-live="polite">
+      <span>{label}</span>
+      <div><i /></div>
+      <small>Please wait. Tapping again is not needed.</small>
+    </div>
+  );
+}
+
 function BatchIntake({ sellers, categories, refresh, save, cancel }: {
   sellers: Ledger["sellers"];
   categories: Ledger["categories"];
@@ -2602,6 +2616,7 @@ function BatchIntake({ sellers, categories, refresh, save, cancel }: {
   const [rows, setRows] = useState<BatchIntakeRow[]>(() => [newRow(), newRow()]);
   const [photos, setPhotos] = useState<Record<string, PhotoDraft[]>>({});
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const field = (name: string, row: BatchIntakeRow) => `${name}_${row.id}`;
   const addImages = async (rowId: string, files: FileList | null, captured: boolean) => {
     if (!files?.length) return;
@@ -2613,6 +2628,8 @@ function BatchIntake({ sellers, categories, refresh, save, cancel }: {
     } catch (error) { toast.error(error instanceof Error ? error.message : "Image could not be prepared"); }
   };
   const submit = async (form: FormData) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     const stones = rows.map((row) => ({
       gemType: txt(form.get(field("type", row))), origin: txt(form.get(field("origin", row))), weight: number(form.get(field("weight", row))),
       color: txt(form.get(field("color", row))) || null, shape: txt(form.get(field("shape", row))) || null, cutStyle: txt(form.get(field("cut", row))) || null,
@@ -2622,7 +2639,7 @@ function BatchIntake({ sellers, categories, refresh, save, cancel }: {
       notes: txt(form.get(field("notes", row))) || null, images: (photos[row.id] ?? []).map(({ dataUrl, captured }) => ({ dataUrl, captured })),
     }));
     setSaving(true);
-    try { await save(stones); } finally { setSaving(false); }
+    try { await save(stones); } finally { savingRef.current = false; setSaving(false); }
   };
   return (
     <form className="batch-intake" action={submit}>
@@ -2661,7 +2678,11 @@ function BatchIntake({ sellers, categories, refresh, save, cancel }: {
           </details>
         ))}
       </div>
-      <div className="batch-intake-footer"><button type="button" className="ops-secondary" onClick={cancel}>Cancel</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Saving stones…" : `Register ${rows.length} stones`} <ArrowRight size={17} /></button></div>
+      <div className="batch-intake-footer">
+        {saving && <SubmissionProgress label="Registering your stones…" />}
+        <button type="button" className="ops-secondary" onClick={cancel} disabled={saving}>Cancel</button>
+        <button type="submit" className="primary-button" disabled={saving}>{saving ? "Saving stones…" : `Register ${rows.length} stones`} <ArrowRight size={17} /></button>
+      </div>
     </form>
   );
 }
@@ -2698,6 +2719,9 @@ function Intake({
     stone?.sellerId ? String(stone.sellerId) : "",
   );
   const [sellerPhotos, setSellerPhotos] = useState<PhotoDraft[]>([]);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const requestKeyRef = useRef(crypto.randomUUID());
   const addPhotos = async (files: FileList | null, captured: boolean) => {
     if (!files?.length) return;
     const remaining = 4 - photos.length;
@@ -2761,8 +2785,23 @@ function Intake({
         <BatchIntake sellers={sellers} categories={categories} refresh={refresh} save={saveStoneBatch} cancel={() => navigate("inventory")} />
       ) : (
       <form
-        className="panel ops-form-card"
-        action={(form) => saveStone(form, photos, removedImageIds)}
+        className={`panel ops-form-card ${saving ? "is-submitting" : ""}`}
+        aria-busy={saving}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (savingRef.current) return;
+          savingRef.current = true;
+          setSaving(true);
+          void saveStone(
+            new FormData(event.currentTarget),
+            photos,
+            removedImageIds,
+            requestKeyRef.current,
+          ).finally(() => {
+            savingRef.current = false;
+            setSaving(false);
+          });
+        }}
       >
         <div className="ops-section-head">
           <h2>01 · Identity & source</h2>
@@ -3140,15 +3179,17 @@ function Intake({
           </label>
         </div>
         <div className="ops-form-footer">
+          {saving && <SubmissionProgress label={stone ? "Saving your changes…" : "Registering your stone…"} />}
           <button
             type="button"
             className="ops-secondary"
+            disabled={saving}
             onClick={() => navigate("inventory")}
           >
             Cancel
           </button>
-          <button className="primary-button" type="submit">
-            {stone ? "Save changes" : "Register stone"} <ArrowRight size={17} />
+          <button className="primary-button" type="submit" disabled={saving}>
+            {saving ? "Saving…" : stone ? "Save changes" : "Register stone"} <ArrowRight size={17} />
           </button>
         </div>
       </form>
@@ -4473,13 +4514,15 @@ function OperationDialog({
   close: () => void;
   stone: Stone;
   ledger: Ledger;
-  submit: (f: FormData) => void;
+  submit: (f: FormData) => Promise<void>;
   error: string;
   refresh: () => Promise<void>;
 }) {
   const [jobKind, setJobKind] = useState<"Cutting" | "Treatment">("Cutting");
   const [jobWorkshop, setJobWorkshop] = useState("");
   const [buyerChoice, setBuyerChoice] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const titles: Record<Operation, string> = {
     job: "Create workshop job",
     dispatch: "Dispatch to provider",
@@ -4575,7 +4618,7 @@ function OperationDialog({
     <Dialog
       open={!!operation}
       onOpenChange={(v) => {
-        if (!v) close();
+        if (!v && !submittingRef.current) close();
       }}
     >
       <DialogContent className="ops-dialog">
@@ -4592,8 +4635,15 @@ function OperationDialog({
             key={`${operation}-${stone.id}`}
             onSubmit={(e) => {
               e.preventDefault();
-              submit(new FormData(e.currentTarget));
+              if (submittingRef.current) return;
+              submittingRef.current = true;
+              setSubmitting(true);
+              void submit(new FormData(e.currentTarget)).finally(() => {
+                submittingRef.current = false;
+                setSubmitting(false);
+              });
             }}
+            aria-busy={submitting}
           >
             <div className="ops-dialog-fields">
               {allowed && (
@@ -5110,11 +5160,12 @@ function OperationDialog({
               </p>
             )}
             <div className="ops-dialog-footer">
-              <button type="button" className="ops-secondary" onClick={close}>
+              {submitting && <SubmissionProgress label="Saving this operation…" />}
+              <button type="button" className="ops-secondary" onClick={close} disabled={submitting}>
                 Cancel
               </button>
-              <button type="submit" className="primary-button">
-                Confirm operation <ArrowRight size={16} />
+              <button type="submit" className="primary-button" disabled={submitting}>
+                {submitting ? "Saving…" : "Confirm operation"} <ArrowRight size={16} />
               </button>
             </div>
           </form>

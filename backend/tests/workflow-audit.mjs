@@ -1,5 +1,6 @@
 /* global process, fetch, console */
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 const baseUrl = process.env.AUDIT_API_URL ?? "http://127.0.0.1:4010/api/v1";
 const frontendOrigin =
@@ -9,7 +10,7 @@ const password = process.env.AUDIT_PASSWORD ?? "AuditOnly-2026!";
 let cookie = "";
 const checks = [];
 
-async function request(path, { method = "GET", body, expected = 200 } = {}) {
+async function request(path, { method = "GET", body, expected = 200, headers = {} } = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
@@ -17,6 +18,7 @@ async function request(path, { method = "GET", body, expected = 200 } = {}) {
       origin: frontendOrigin,
       "x-requested-with": "XMLHttpRequest",
       ...(cookie ? { cookie } : {}),
+      ...headers,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -117,14 +119,24 @@ const baseStone = (gemType, origin, weight, purchaseCost) => ({
 
 let primaryId;
 await check("single-stone intake with permanent identity and image", async () => {
+  const requestKey = randomUUID();
+  const body = {
+    ...baseStone("Audit Sapphire", "Audit Ratnapura", 4.5, 400000),
+    images: [{ dataUrl: tinyPng, captured: false }],
+  };
   const result = await request("/stones", {
     method: "POST",
     expected: 201,
-    body: {
-      ...baseStone("Audit Sapphire", "Audit Ratnapura", 4.5, 400000),
-      images: [{ dataUrl: tinyPng, captured: false }],
-    },
+    headers: { "idempotency-key": requestKey },
+    body,
   });
+  const repeated = await request("/stones", {
+    method: "POST",
+    expected: 201,
+    headers: { "idempotency-key": requestKey },
+    body,
+  });
+  assert.equal(repeated.data.id, result.data.id);
   primaryId = result.data.id;
   state = await ledger();
   const created = stone(state, primaryId);

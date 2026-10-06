@@ -167,9 +167,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ operation, stoneId, data }),
     }),
-  intake: (data: Record<string, unknown>) =>
+  intake: (data: Record<string, unknown>, requestKey: string) =>
     request<{ id: string }>("/stones", {
       method: "POST",
+      headers: { "Idempotency-Key": requestKey },
       body: JSON.stringify(data),
     }),
   batchIntake: (stones: Array<Record<string, unknown>>) =>

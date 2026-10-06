@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { z } from "zod";
 import { asyncHandler } from "../../lib/async-handler.js";
 import { stoneId } from "../../validation/common.js";
 import { listEvents } from "../events/events.repository.js";
@@ -17,7 +18,7 @@ import {
   editStoneRecord,
   holdStone,
   moveStone,
-  receiveStone,
+  receiveStoneOnce,
   receiveStones,
 } from "./stones.service.js";
 import { HttpError } from "../../lib/http-error.js";
@@ -43,9 +44,18 @@ stonesRouter.post(
   "/",
   asyncHandler(async (request, response) => {
     const performedBy = String(response.locals.auditUser?.name ?? "System");
+    const userId = Number(response.locals.auditUser?.id);
+    const requestKey = z.uuid().parse(request.get("Idempotency-Key"));
     response
       .status(201)
-      .json({ data: await receiveStone(intakeStone.parse(request.body), performedBy) });
+      .json({
+        data: await receiveStoneOnce(
+          intakeStone.parse(request.body),
+          performedBy,
+          userId,
+          requestKey,
+        ),
+      });
   }),
 );
 
