@@ -1053,22 +1053,79 @@ export default function Home({
         />
       )}
       <Dialog open={devicePromptOpen} onOpenChange={setDevicePromptOpen}>
-        <DialogContent className="device-save-dialog" showCloseButton={false}>
-          <div className="device-save-icon"><BellRing size={25} /></div>
-          <DialogHeader>
-            <DialogTitle>Save this device for alerts?</DialogTitle>
-            <DialogDescription>
+        <DialogContent
+          className="device-save-dialog"
+          showCloseButton={false}
+          style={{
+            width: "min(520px, calc(100vw - 24px))",
+            maxWidth: "none",
+            maxHeight: "calc(100dvh - 24px)",
+            overflowY: "auto",
+            gap: 18,
+            border: "1px solid #d5e0da",
+            borderRadius: 24,
+            background: "#fbfcfa",
+            padding: "clamp(18px, 5vw, 30px)",
+            color: "#17251f",
+            boxShadow: "0 30px 90px #102b2250",
+          }}
+        >
+          <div
+            className="device-save-icon"
+            style={{
+              display: "grid",
+              width: 52,
+              height: 52,
+              flex: "0 0 52px",
+              placeItems: "center",
+              borderRadius: 16,
+              background: "#e4f2eb",
+              color: "#1c614e",
+            }}
+          ><BellRing size={25} /></div>
+          <DialogHeader style={{ display: "flex", gap: 8 }}>
+            <DialogTitle style={{ font: "600 clamp(23px, 6vw, 26px)/1.15 Georgia, serif" }}>
+              Save this device for alerts?
+            </DialogTitle>
+            <DialogDescription style={{ color: "#607169", fontSize: 13, lineHeight: 1.65 }}>
               Origin can remember this browser so important deadlines and overdue work can reach you even after the app closes or your session ends.
             </DialogDescription>
           </DialogHeader>
-          <div className="device-save-summary">
-            <div><strong>What is saved</strong><span>Your device type, browser name and a secure notification address.</span></div>
-            <div><strong>What is never saved</strong><span>Your password, photos, files and exact location are not collected.</span></div>
+          <div
+            className="device-save-summary"
+            style={{
+              display: "grid",
+              gap: 1,
+              overflow: "hidden",
+              border: "1px solid #dce4df",
+              borderRadius: 15,
+              background: "#dce4df",
+            }}
+          >
+            <div style={{ display: "grid", gap: 4, background: "#fff", padding: "14px 16px" }}>
+              <strong style={{ color: "#274f43", fontSize: 12 }}>What is saved</strong>
+              <span style={{ color: "#68766f", fontSize: 11, lineHeight: 1.55 }}>Your device type, browser name and a secure notification address.</span>
+            </div>
+            <div style={{ display: "grid", gap: 4, background: "#fff", padding: "14px 16px" }}>
+              <strong style={{ color: "#274f43", fontSize: 12 }}>What is never saved</strong>
+              <span style={{ color: "#68766f", fontSize: 11, lineHeight: 1.55 }}>Your password, photos, files and exact location are not collected.</span>
+            </div>
           </div>
-          <p className="device-save-note">Your browser will ask for notification permission next. You can turn alerts off at any time from Notifications.</p>
-          <div className="device-save-actions">
-            <button className="secondary-button" onClick={() => setDevicePromptOpen(false)}>Not now</button>
-            <button className="primary-button" onClick={() => void enableBrowserAlerts()}>
+          <p
+            className="device-save-note"
+            style={{
+              margin: 0,
+              borderRadius: 12,
+              background: "#f0f4f1",
+              padding: "11px 13px",
+              color: "#68766f",
+              fontSize: 11,
+              lineHeight: 1.55,
+            }}
+          >Your browser will ask for notification permission next. You can turn alerts off at any time from Notifications.</p>
+          <div className="device-save-actions" style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 10 }}>
+            <button className="secondary-button" style={{ flex: "1 1 110px" }} onClick={() => setDevicePromptOpen(false)}>Not now</button>
+            <button className="primary-button" style={{ flex: "1.4 1 170px" }} onClick={() => void enableBrowserAlerts()}>
               Save this device <ArrowRight size={17} />
             </button>
           </div>
