@@ -495,6 +495,289 @@ button {
   align-items: center;
   gap: 15px;
 }
+.notification-anchor {
+  position: relative;
+}
+.notification-button {
+  position: relative;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid #dfe4df;
+  border-radius: 11px;
+  background: #fff;
+  color: #315e52;
+}
+.notification-button:hover {
+  border-color: #9ab8ad;
+  background: #f2f7f4;
+}
+.notification-button b {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0 4px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #b84d3e;
+  color: #fff;
+  font-size: 9px;
+}
+.notification-panel {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 12px);
+  right: 0;
+  width: min(410px, calc(100vw - 28px));
+  max-height: min(680px, calc(100dvh - 90px));
+  overflow: hidden;
+  border: 1px solid #d9dfda;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 24px 70px #142d2540;
+}
+.notification-head,
+.notification-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.notification-head {
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid #e8ebe7;
+}
+.notification-head > div {
+  display: grid;
+  gap: 3px;
+}
+.notification-head strong {
+  color: #172620;
+  font: 700 20px/1.1 Georgia, serif;
+}
+.notification-head span,
+.notification-tools span {
+  color: #76817c;
+  font-size: 11px;
+}
+.notification-head > button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: #f2f4f1;
+  color: #42524c;
+}
+.browser-alert-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  margin: 12px;
+  padding: 12px;
+  border: 1px solid #cfe0d8;
+  border-radius: 13px;
+  background: #eef7f2;
+  color: #245b4c;
+}
+.browser-alert-card > div {
+  display: grid;
+  gap: 2px;
+}
+.browser-alert-card strong { font-size: 12px; }
+.browser-alert-card span { color: #60756d; font-size: 10px; line-height: 1.4; }
+.browser-alert-card button,
+.notification-tools button {
+  border: 0;
+  background: transparent;
+  color: #246654;
+  font-size: 10px;
+  font-weight: 800;
+}
+.browser-alert-card button {
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: #1a5848;
+  color: #fff;
+}
+.browser-alert-card.is-on {
+  border-color: #b9dacd;
+  background: #e8f5ef;
+}
+.browser-alert-card button.quiet-action {
+  border: 1px solid #bcd2c9;
+  background: #fff;
+  color: #35695b;
+}
+.device-save-dialog {
+  max-width: 520px;
+  gap: 18px;
+  overflow: hidden;
+  border-color: #d5e0da;
+  border-radius: 24px;
+  background: #fbfcfa;
+  padding: 30px;
+  color: #17251f;
+  box-shadow: 0 30px 90px #102b2250;
+}
+.device-save-dialog [data-slot="dialog-header"] {
+  gap: 8px;
+  padding-right: 8px;
+}
+.device-save-dialog [data-slot="dialog-title"] {
+  font: 600 26px/1.15 Georgia, serif;
+}
+.device-save-dialog [data-slot="dialog-description"] {
+  color: #607169;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.device-save-icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 16px;
+  background: #e4f2eb;
+  color: #1c614e;
+}
+.device-save-summary {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid #dce4df;
+  border-radius: 15px;
+  background: #dce4df;
+}
+.device-save-summary > div {
+  display: grid;
+  gap: 4px;
+  background: #fff;
+  padding: 14px 16px;
+}
+.device-save-summary strong {
+  color: #274f43;
+  font-size: 12px;
+}
+.device-save-summary span,
+.device-save-note {
+  color: #68766f;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.device-save-note {
+  margin: 0;
+  border-radius: 12px;
+  background: #f0f4f1;
+  padding: 11px 13px;
+}
+.device-save-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.device-save-actions button {
+  min-height: 44px;
+  padding: 0 17px;
+}
+.notification-tools {
+  padding: 10px 16px;
+  border-bottom: 1px solid #edf0ec;
+}
+.notification-list {
+  max-height: 470px;
+  overflow-y: auto;
+}
+.notification-list > button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 8px 1fr;
+  gap: 10px;
+  border: 0;
+  border-bottom: 1px solid #edf0ec;
+  background: #fff;
+  padding: 14px 17px;
+  text-align: left;
+}
+.notification-list > button:hover,
+.notification-list > button.is-unread { background: #f5f8f5; }
+.notification-list > button > i {
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #aab4af;
+}
+.notification-list > button.is-unread > i { background: #2d8268; }
+.notification-list > button.severity-warning > i { background: #d69334; }
+.notification-list > button.severity-urgent > i { background: #c44f42; }
+.notification-list > button > span { display: grid; gap: 4px; }
+.notification-list strong { color: #26332e; font-size: 12px; }
+.notification-list small { color: #66726d; font-size: 11px; line-height: 1.45; }
+.notification-list time { color: #929b97; font-size: 9px; }
+.notification-empty {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  padding: 42px 24px;
+  color: #7d8b85;
+  text-align: center;
+}
+.notification-empty strong { color: #43524c; font-size: 13px; }
+.notification-empty span { max-width: 260px; font-size: 11px; line-height: 1.5; }
+.friendly-error-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: linear-gradient(145deg, #f7f7f2, #eaf0ec);
+  color: #1d2b26;
+}
+.friendly-error-page > div {
+  width: min(520px, 100%);
+  padding: 40px;
+  border: 1px solid #dce2dc;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 22px 60px #173b2d18;
+  text-align: center;
+}
+.friendly-error-page span {
+  color: #2d735f;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.friendly-error-page h1 {
+  margin: 12px 0 8px;
+  font: 700 clamp(28px, 6vw, 42px)/1.08 Georgia, serif;
+}
+.friendly-error-page p {
+  margin: 0 auto 24px;
+  color: #69756f;
+  line-height: 1.6;
+}
+.friendly-error-page button,
+.friendly-error-page a {
+  display: inline-flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 11px;
+  background: #17483c;
+  padding: 0 20px;
+  color: #fff;
+  font-weight: 750;
+  text-decoration: none;
+}
 .sync-state {
   color: #78817d;
   font-size: 11px;
@@ -1981,24 +2264,6 @@ button {
 .ops-shell .metric > strong {
   font-size: 25px;
 }
-.demo-flag {
-  padding: 13px 12px;
-  margin: 0 0 8px;
-  border: 1px solid #ffffff20;
-  border-radius: 8px;
-  font-size: 10px;
-  letter-spacing: 0.11em;
-  color: #d6bd81;
-  font-weight: 700;
-}
-.demo-flag span {
-  display: block;
-  margin-top: 5px;
-  font-size: 11px;
-  letter-spacing: 0;
-  color: #9fb7ad;
-  font-weight: 400;
-}
 .ops-notice {
   display: flex;
   align-items: center;
@@ -3199,9 +3464,7 @@ button {
     font-size: 16px;
   }
   .ops-form-footer {
-    position: sticky;
-    bottom: 0;
-    z-index: 3;
+    position: static;
     padding: 12px 16px;
     box-shadow: 0 -8px 20px #17211f0d;
   }
@@ -3394,6 +3657,19 @@ button {
   .top-actions {
     order: 3;
   }
+  .notification-panel {
+    position: absolute;
+    top: 50px;
+    right: -51px;
+    bottom: auto;
+    left: auto;
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - 176px - env(safe-area-inset-bottom));
+    border-radius: 20px;
+  }
+  .notification-list {
+    max-height: calc(100dvh - 280px - env(safe-area-inset-bottom));
+  }
   .mini-avatar {
     width: 38px;
     height: 38px;
@@ -3539,7 +3815,6 @@ button {
     background: #fcfdfb;
   }
   .ops-form-footer {
-    bottom: calc(80px + env(safe-area-inset-bottom));
     border-radius: 0 0 16px 16px;
   }
   .primary-button {
@@ -4093,6 +4368,10 @@ button:disabled { cursor: not-allowed; }
 }
 
 @media (max-width: 430px) {
+  .device-save-dialog { width: calc(100vw - 24px); max-width: none; gap: 14px; border-radius: 22px; padding: 22px 18px; }
+  .device-save-dialog [data-slot="dialog-title"] { font-size: 23px; }
+  .device-save-actions { display: grid; grid-template-columns: .8fr 1.4fr; }
+  .device-save-actions button { width: 100%; padding-inline: 12px; }
   .intake-mode-switch { grid-template-columns: 1fr; }
   .batch-intake-footer { display: grid; grid-template-columns: .8fr 1.4fr; }
   .dashboard-priority-list, .dashboard-operation-groups, .dashboard-expected-list { padding-inline: 14px; }

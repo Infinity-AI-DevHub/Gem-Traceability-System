@@ -9,6 +9,8 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Bell,
+  BellRing,
   Camera,
   ClipboardCheck,
   Download,
@@ -49,7 +51,7 @@ import {
   type Ledger,
   type Stone,
 } from "./demo-data";
-import { api } from "./api";
+import { api, type AppNotification } from "./api";
 
 type Page =
   | "dashboard"
@@ -141,6 +143,154 @@ function Badge({ value }: { value: string }) {
     </span>
   );
 }
+
+function notificationAge(value: string) {
+  const minutes = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(value).getTime()) / 60_000),
+  );
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function NotificationCentre({
+  items,
+  unread,
+  pushState,
+  close,
+  openItem,
+  markAllRead,
+  enablePush,
+  disablePush,
+}: {
+  items: AppNotification[];
+  unread: number;
+  pushState: "checking" | "on" | "off" | "blocked" | "unsupported" | "unavailable";
+  close: () => void;
+  openItem: (item: AppNotification) => void;
+  markAllRead: () => void;
+  enablePush: () => void;
+  disablePush: () => void;
+}) {
+  return (
+    <div className="notification-panel" role="dialog" aria-label="Notifications">
+      <div className="notification-head">
+        <div>
+          <strong>Notifications</strong>
+          <span>{unread ? `${unread} new update${unread === 1 ? "" : "s"}` : "You are all caught up"}</span>
+        </div>
+        <button onClick={close} aria-label="Close notifications"><X size={18} /></button>
+      </div>
+      {pushState === "on" ? (
+        <div className="browser-alert-card is-on">
+          <BellRing size={19} />
+          <div>
+            <strong>This device is saved</strong>
+            <span>Important alerts can reach this browser after the app closes or signs out.</span>
+          </div>
+          <button className="quiet-action" onClick={disablePush}>Turn off</button>
+        </div>
+      ) : (
+        <div className="browser-alert-card">
+          <BellRing size={19} />
+          <div>
+            <strong>Get alerts on this device</strong>
+            <span>
+              {pushState === "blocked"
+                ? "Notifications are blocked in your browser settings."
+                : pushState === "unsupported"
+                  ? "This browser does not support outside-app alerts."
+                  : pushState === "unavailable"
+                    ? "Browser alerts need one more setup step from the administrator."
+                    : "See important due and overdue alerts even when the app is closed."}
+            </span>
+          </div>
+          {(pushState === "off" || pushState === "checking") && (
+            <button onClick={enablePush} disabled={pushState === "checking"}>
+              {pushState === "checking" ? "Checking…" : "Turn on"}
+            </button>
+          )}
+        </div>
+      )}
+      <div className="notification-tools">
+        <span>Latest updates</span>
+        {unread > 0 && <button onClick={markAllRead}>Mark all as read</button>}
+      </div>
+      <div className="notification-list">
+        {items.map((item) => (
+          <button
+            key={item.id}
+            className={`${item.read ? "" : "is-unread"} severity-${item.severity.toLowerCase()}`}
+            onClick={() => openItem(item)}
+          >
+            <i />
+            <span>
+              <strong>{item.title}</strong>
+              <small>{item.message}</small>
+              <time>{notificationAge(item.createdAt)}</time>
+            </span>
+          </button>
+        ))}
+        {!items.length && (
+          <div className="notification-empty">
+            <Bell size={24} />
+            <strong>No notifications yet</strong>
+            <span>Important updates and approaching deadlines will appear here.</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function applicationServerKey(value: string) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = (value + padding).replaceAll("-", "+").replaceAll("_", "/");
+  return Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+}
+function browserDeviceDetails() {
+  const agent = navigator.userAgent;
+  const browserName = /Edg\//.test(agent)
+    ? "Microsoft Edge"
+    : /OPR\//.test(agent)
+      ? "Opera"
+      : /CriOS\//.test(agent)
+        ? "Google Chrome"
+        : /FxiOS\//.test(agent)
+          ? "Mozilla Firefox"
+          : /Chrome\//.test(agent)
+            ? "Google Chrome"
+            : /Firefox\//.test(agent)
+              ? "Mozilla Firefox"
+              : /Safari\//.test(agent)
+                ? "Safari"
+                : "Web browser";
+  const deviceName = /iPad/.test(agent)
+    ? "iPad"
+    : /iPhone/.test(agent)
+      ? "iPhone"
+      : /Android/.test(agent)
+        ? "Android device"
+        : /Mobile/.test(agent)
+          ? "Mobile device"
+          : "Computer";
+  const platformName = /Android/.test(agent)
+    ? "Android"
+    : /iPhone|iPad/.test(agent)
+      ? "iOS or iPadOS"
+      : /Mac/.test(agent)
+        ? "macOS"
+        : /Windows/.test(agent)
+          ? "Windows"
+          : /Linux/.test(agent)
+            ? "Linux"
+            : "Unknown platform";
+  return { deviceName, browserName, platformName };
+}
 function Login({
   enter,
   error,
@@ -148,6 +298,7 @@ function Login({
   enter: (username: string, password: string) => Promise<void>;
   error: string;
 }) {
+  const [submitting, setSubmitting] = useState(false);
   return (
     <main className="login-shell">
       <section className="login-story">
@@ -180,18 +331,35 @@ function Login({
           <p className="eyebrow">SECURE WORKSPACE</p>
           <h2>Welcome back</h2>
           <p className="muted">
-            Sign in to the database-backed gemstone operations workspace.
+            Sign in to manage your gemstone operations securely.
           </p>
           <form
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
+              if (submitting) return;
               const form = new FormData(e.currentTarget);
-              void enter(txt(form.get("username")), txt(form.get("password")));
+              setSubmitting(true);
+              try {
+                await enter(
+                  txt(form.get("username")),
+                  txt(form.get("password")),
+                );
+              } finally {
+                setSubmitting(false);
+              }
             }}
           >
             <label>
               Username
-              <input name="username" autoComplete="username" required />
+              <input
+                name="username"
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
+                maxLength={80}
+                disabled={submitting}
+                required
+              />
             </label>
             <label>
               Password
@@ -199,12 +367,18 @@ function Login({
                 name="password"
                 type="password"
                 autoComplete="current-password"
+                maxLength={200}
+                disabled={submitting}
                 required
               />
             </label>
             {error && <div className="ops-form-error">{error}</div>}
-            <button className="primary-button login-button">
-              Sign in <ArrowRight size={18} />
+            <button
+              className="primary-button login-button"
+              disabled={submitting}
+            >
+              {submitting ? "Signing in…" : "Sign in"}{" "}
+              {!submitting && <ArrowRight size={18} />}
             </button>
           </form>
           <p className="demo-note">
@@ -270,7 +444,14 @@ export default function Home({
     [menu, setMenu] = useState(false),
     [search, setSearch] = useState(""),
     [counted, setCounted] = useState<string[]>([]),
-    [editing, setEditing] = useState<string | null>(initialEditing || null);
+    [editing, setEditing] = useState<string | null>(initialEditing || null),
+    [notifications, setNotifications] = useState<AppNotification[]>([]),
+    [notificationOpen, setNotificationOpen] = useState(false),
+    [devicePromptOpen, setDevicePromptOpen] = useState(false),
+    [savedDevice, setSavedDevice] = useState(false),
+    [pushState, setPushState] = useState<
+      "checking" | "on" | "off" | "blocked" | "unsupported" | "unavailable"
+    >("checking");
   const stone =
     ledger.stones.find((s) => s.id === selected) || ledger.stones[0];
   const fail = (error: unknown, fallback: string) => {
@@ -284,7 +465,7 @@ export default function Home({
       setLedger(data);
       setSelected((current) => current || data.stones[0]?.id || "");
     } catch (error) {
-      fail(error, "Could not load the database");
+      fail(error, "We could not open your information. Please try again.");
     }
   };
   useEffect(() => {
@@ -309,6 +490,10 @@ export default function Home({
           }
         }
         setLoggedIn(true);
+        if (sessionStorage.getItem("origin:ask-save-device") === "yes") {
+          sessionStorage.removeItem("origin:ask-save-device");
+          setDevicePromptOpen(true);
+        }
         if (loginPage) router.replace(postLoginPath);
       } catch {
         if (!active) return;
@@ -331,6 +516,53 @@ export default function Home({
     return () =>
       window.removeEventListener("origin:unauthorized", unauthorized);
   }, [router]);
+  useEffect(() => {
+    if (!loggedIn) return;
+    let active = true;
+    const loadNotifications = async () => {
+      try {
+        const result = await api.notifications();
+        if (active) setNotifications(result.items);
+      } catch {
+        // The main workspace remains usable if notification refresh fails.
+      }
+    };
+    void loadNotifications();
+    const timer = window.setInterval(() => void loadNotifications(), 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [loggedIn]);
+  useEffect(() => {
+    if (!loggedIn) return;
+    void Promise.resolve().then(async () => {
+      if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+        setPushState("unsupported");
+        return;
+      }
+      if (Notification.permission === "denied") {
+        setPushState("blocked");
+        return;
+      }
+      try {
+        await navigator.serviceWorker.register("/sw.js");
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        if (subscription) {
+          const status = await api.pushSubscriptionStatus(subscription.endpoint);
+          setSavedDevice(status.saved);
+          setPushState(status.saved ? "on" : "off");
+          if (status.saved) setDevicePromptOpen(false);
+        } else {
+          setSavedDevice(false);
+          setPushState("off");
+        }
+      } catch {
+        setPushState("unsupported");
+      }
+    });
+  }, [loggedIn]);
   const navigate = (p: Page, id?: string) => {
     const jewellery = id
       ? ledger.jewelleryProfiles.find((profile) => profile.stoneId === id)
@@ -375,6 +607,90 @@ export default function Home({
     setNotice("");
     toast.success(message);
   };
+  const enableBrowserAlerts = async () => {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      setPushState("unsupported");
+      toast.error("This browser cannot show alerts outside the app.");
+      return;
+    }
+    setPushState("checking");
+    try {
+      const config = await api.pushConfig();
+      if (!config.available || !config.publicKey) {
+        setPushState("unavailable");
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setPushState(permission === "denied" ? "blocked" : "off");
+        toast.error("Browser alerts were not turned on. You can try again later.");
+        return;
+      }
+      const registration = await navigator.serviceWorker.register("/sw.js");
+      const ready = await navigator.serviceWorker.ready;
+      const existing = await ready.pushManager.getSubscription();
+      const subscription =
+        existing ??
+        (await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: applicationServerKey(config.publicKey),
+        }));
+      await api.savePushSubscription(subscription.toJSON(), {
+        ...browserDeviceDetails(),
+        persistAfterLogout: true,
+      });
+      setSavedDevice(true);
+      setDevicePromptOpen(false);
+      setPushState("on");
+      toast.success("This device is saved. Important alerts can reach you after the app closes.");
+    } catch (error) {
+      setPushState("off");
+      fail(error, "We could not turn on browser alerts. Please try again.");
+    }
+  };
+  const disableBrowserAlerts = async () => {
+    try {
+      const registration = "serviceWorker" in navigator
+        ? await navigator.serviceWorker.ready.catch(() => null)
+        : null;
+      const subscription = await registration?.pushManager.getSubscription();
+      if (subscription) {
+        await api.removePushSubscription(subscription.endpoint);
+        await subscription.unsubscribe();
+      }
+      setSavedDevice(false);
+      setPushState("off");
+      toast.success("Browser alerts are off on this device.");
+    } catch (error) {
+      fail(error, "We could not turn off browser alerts. Please try again.");
+    }
+  };
+  const openNotification = async (item: AppNotification) => {
+    setNotifications((current) =>
+      current.map((entry) =>
+        entry.id === item.id ? { ...entry, read: true } : entry,
+      ),
+    );
+    setNotificationOpen(false);
+    if (!item.read) {
+      try {
+        await api.markNotificationRead(item.id);
+      } catch {
+        // Opening the destination is more important than blocking on read state.
+      }
+    }
+    router.push(item.actionUrl || "/dashboard");
+  };
+  const markAllNotificationsRead = async () => {
+    setNotifications((current) =>
+      current.map((item) => ({ ...item, read: true })),
+    );
+    try {
+      await api.markAllNotificationsRead();
+    } catch (error) {
+      fail(error, "We could not mark the notifications as read.");
+    }
+  };
   const submitOperation = async (form: FormData) => {
     const op = operation;
     if (!op) return;
@@ -388,9 +704,9 @@ export default function Home({
       });
       setOperation(null);
       await refresh();
-      flash("Operation saved to the database.");
+      flash("Done. Your changes have been saved.");
     } catch (error) {
-      fail(error, "Operation failed");
+      fail(error, "We could not save that change. Please try again.");
     }
   };
   const saveStone = async (
@@ -459,7 +775,7 @@ export default function Home({
           : `${result.id} registered in MySQL.`,
       );
     } catch (error) {
-      fail(error, "Intake failed");
+      fail(error, "We could not register this stone. Please check the details and try again.");
     }
   };
   const saveStoneBatch = async (
@@ -471,7 +787,7 @@ export default function Home({
       navigate("inventory");
       flash(`${result.count} stones registered together in MySQL.`);
     } catch (error) {
-      fail(error, "Batch intake failed");
+      fail(error, "We could not register these stones. Please check the details and try again.");
     }
   };
   const stocktake = (id: string, missing: boolean) => {
@@ -490,7 +806,7 @@ export default function Home({
             : `${id} verified in the stocktake.`,
         );
       })
-      .catch((error) => fail(error, "Stocktake failed"));
+      .catch((error) => fail(error, "We could not save this stock check. Please try again."));
   };
   if (authChecking)
     return (
@@ -509,24 +825,35 @@ export default function Home({
             await refresh();
             setNotice("");
             setLoggedIn(true);
+            sessionStorage.setItem("origin:ask-save-device", "yes");
+            setDevicePromptOpen(true);
             setPage("dashboard");
             router.replace(postLoginPath);
             toast.success("Welcome back. The workspace is ready.");
           } catch (error) {
-            fail(error, "Sign in failed");
+            fail(error, "We could not sign you in. Please check your details and try again.");
           }
         }}
       />
     );
   const signOut = async () => {
     try {
+      if (!savedDevice && "serviceWorker" in navigator) {
+        const registration = await navigator.serviceWorker.ready.catch(() => null);
+        const subscription = await registration?.pushManager.getSubscription();
+        if (subscription) {
+          await api.removePushSubscription(subscription.endpoint).catch(() => undefined);
+          await subscription.unsubscribe().catch(() => false);
+        }
+      }
       await api.logout();
       setLedger(emptyLedger);
       setLoggedIn(false);
+      setNotifications([]);
       router.replace("/login");
       toast.success("Signed out safely.");
     } catch (error) {
-      fail(error, "Sign out failed");
+      fail(error, "We could not sign you out. Please try again.");
     }
   };
   const actions = { navigate, open, edit, saveStone, download, flash };
@@ -569,9 +896,6 @@ export default function Home({
           ))}
         </nav>
         <div className="side-foot">
-          <div className="demo-flag">
-            DATABASE CONNECTED<span>MySQL is the source of truth</span>
-          </div>
           <div className="profile">
             <div className="avatar">AD</div>
             <div>
@@ -618,6 +942,31 @@ export default function Home({
             <span className="sync-state">
               <i /> MySQL connected
             </span>
+            <div className="notification-anchor">
+              <button
+                className="notification-button"
+                onClick={() => setNotificationOpen((value) => !value)}
+                aria-label={`${notifications.filter((item) => !item.read).length} unread notifications`}
+                aria-expanded={notificationOpen}
+              >
+                <Bell size={19} />
+                {notifications.some((item) => !item.read) && (
+                  <b>{Math.min(99, notifications.filter((item) => !item.read).length)}</b>
+                )}
+              </button>
+              {notificationOpen && (
+                <NotificationCentre
+                  items={notifications}
+                  unread={notifications.filter((item) => !item.read).length}
+                  pushState={pushState}
+                  close={() => setNotificationOpen(false)}
+                  openItem={(item) => void openNotification(item)}
+                  markAllRead={() => void markAllNotificationsRead()}
+                  enablePush={() => void enableBrowserAlerts()}
+                  disablePush={() => void disableBrowserAlerts()}
+                />
+              )}
+            </div>
             <button
               className="mini-avatar"
               onClick={() => navigate("dashboard")}
@@ -703,6 +1052,28 @@ export default function Home({
           error={operation ? notice : ""}
         />
       )}
+      <Dialog open={devicePromptOpen} onOpenChange={setDevicePromptOpen}>
+        <DialogContent className="device-save-dialog" showCloseButton={false}>
+          <div className="device-save-icon"><BellRing size={25} /></div>
+          <DialogHeader>
+            <DialogTitle>Save this device for alerts?</DialogTitle>
+            <DialogDescription>
+              Origin can remember this browser so important deadlines and overdue work can reach you even after the app closes or your session ends.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="device-save-summary">
+            <div><strong>What is saved</strong><span>Your device type, browser name and a secure notification address.</span></div>
+            <div><strong>What is never saved</strong><span>Your password, photos, files and exact location are not collected.</span></div>
+          </div>
+          <p className="device-save-note">Your browser will ask for notification permission next. You can turn alerts off at any time from Notifications.</p>
+          <div className="device-save-actions">
+            <button className="secondary-button" onClick={() => setDevicePromptOpen(false)}>Not now</button>
+            <button className="primary-button" onClick={() => void enableBrowserAlerts()}>
+              Save this device <ArrowRight size={17} />
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -2629,7 +3000,7 @@ function Intake({
           <h2>03 · Stone images</h2>
           <p>
             Add up to four images. Every image is centre-cropped to a consistent
-            1:1 square and stored in MySQL.
+            1:1 square and stored securely with this record.
           </p>
         </div>
         <div className="photo-capture">

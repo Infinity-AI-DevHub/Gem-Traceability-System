@@ -2,6 +2,8 @@
 import assert from "node:assert/strict";
 
 const baseUrl = process.env.AUDIT_API_URL ?? "http://127.0.0.1:4010/api/v1";
+const frontendOrigin =
+  process.env.AUDIT_FRONTEND_ORIGIN ?? "http://127.0.0.1:3500";
 const username = process.env.AUDIT_USERNAME ?? "audit-admin";
 const password = process.env.AUDIT_PASSWORD ?? "AuditOnly-2026!";
 let cookie = "";
@@ -12,6 +14,8 @@ async function request(path, { method = "GET", body, expected = 200 } = {}) {
     method,
     headers: {
       ...(body === undefined ? {} : { "content-type": "application/json" }),
+      origin: frontendOrigin,
+      "x-requested-with": "XMLHttpRequest",
       ...(cookie ? { cookie } : {}),
     },
     body: body === undefined ? undefined : JSON.stringify(body),

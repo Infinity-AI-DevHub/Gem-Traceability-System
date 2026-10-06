@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export function proxy(request: NextRequest) {
-  if (!request.cookies.has("origin_session")) {
+  if (
+    !request.cookies.has("origin_session") &&
+    !request.cookies.has("__Host-origin_session")
+  ) {
     const login = new URL("/login", request.url);
     login.searchParams.set("next", request.nextUrl.pathname);
     return NextResponse.redirect(login);

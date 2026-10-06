@@ -19,7 +19,8 @@ Prepare these values:
 - VPS public IPv4 address
 - Git repository URL, or a ZIP of this repository
 - aaPanel MySQL database name, username, password, host, and port
-- A new administrator username and a strong password of at least 12 characters
+- A new administrator username and a password of at least 14 characters with
+  uppercase and lowercase letters, a number, and a symbol
 
 The server needs Node.js 22.13 or newer, npm, Git, Nginx, MySQL, and PM2.
 Install Nginx and MySQL from aaPanel. Install a supported Node.js 22 release,
@@ -112,7 +113,22 @@ DB_NAME=YOUR_AAPANEL_DATABASE
 DB_USER=YOUR_AAPANEL_DATABASE_USER
 DB_PASSWORD=YOUR_STRONG_DATABASE_PASSWORD
 DB_CONNECTION_LIMIT=10
+VAPID_PUBLIC_KEY=YOUR_PUBLIC_VAPID_KEY
+VAPID_PRIVATE_KEY=YOUR_PRIVATE_VAPID_KEY
+VAPID_SUBJECT=mailto:admin@1ctstore.com
 ```
+
+Generate the two VAPID keys once on the server:
+
+```bash
+npm exec --workspace backend web-push -- generate-vapid-keys --json
+```
+
+Copy the returned public and private values into `backend/.env`. Keep the
+private key secret and backed up. Do not generate new keys during normal
+deployments, because browsers subscribed with the old key would need to enable
+alerts again. Browser notifications require HTTPS; the production domain
+already meets that requirement after the SSL step below.
 
 Create the frontend production environment before building:
 
@@ -233,6 +249,7 @@ location /api/ {
     proxy_read_timeout 120s;
     proxy_send_timeout 120s;
     proxy_buffering off;
+    proxy_hide_header X-Powered-By;
 }
 
 location /uploads/ {
@@ -243,6 +260,7 @@ location /uploads/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_buffering off;
+    proxy_hide_header X-Powered-By;
 }
 
 location / {
@@ -255,6 +273,7 @@ location / {
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
     proxy_read_timeout 120s;
+    proxy_hide_header X-Powered-By;
 }
 
 location ~ /\. {
@@ -278,6 +297,12 @@ has a valid matching certificate:
 
 Do not use Cloudflare **Flexible** mode; it can create redirect loops and leaves
 the Cloudflare-to-VPS connection unencrypted.
+
+In Cloudflare, keep the proxy enabled and create a rate-limiting rule for
+`POST /api/v1/auth/login` if that feature is available on the account. The
+application also blocks repeated attempts by username and IP, but filtering at
+Cloudflare reduces unnecessary traffic reaching the VPS. Never create a cache
+rule for `/api/*` or `/uploads/*`.
 
 ## 11. Final production verification
 

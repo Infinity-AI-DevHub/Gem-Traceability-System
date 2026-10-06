@@ -15,6 +15,9 @@ const schema = z.object({
   DB_USER: z.string().min(1).default("origin_app"),
   DB_PASSWORD: z.string().default(""),
   DB_CONNECTION_LIMIT: z.coerce.number().int().min(1).max(50).default(10),
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().default("mailto:admin@1ctstore.com"),
 });
 
 export const env = schema.parse(process.env);

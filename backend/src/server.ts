@@ -1,9 +1,11 @@
 import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { pool } from "./database/pool.js";
+import { startNotificationWorker } from "./modules/notifications/notifications.service.js";
 
 const server = createApp().listen(env.PORT, "127.0.0.1", () => {
   console.log(`Origin backend listening on http://127.0.0.1:${env.PORT}`);
+  startNotificationWorker();
 });
 
 async function shutdown(signal: string) {

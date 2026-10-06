@@ -3,16 +3,59 @@ import type { CategoryItem, CategoryKey, Ledger } from "./demo-data";
 const apiUrl =
   process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:4500/api/v1";
 
+export type AppNotification = {
+  id: number;
+  kind: string;
+  severity: "INFO" | "SUCCESS" | "WARNING" | "URGENT";
+  title: string;
+  message: string;
+  actionUrl: string;
+  read: boolean;
+  createdAt: string;
+};
+
+function friendlyError(status: number, serverMessage?: string) {
+  if (status === 401) return "Your session has ended. Please sign in again.";
+  if (status === 403) return "You do not have permission to do that.";
+  if (status === 404) return "We could not find that item. It may have been removed.";
+  if (status === 409)
+    return serverMessage || "This information changed. Please refresh and try again.";
+  if (status === 413) return "That file is too large. Please choose a smaller file.";
+  if (status === 422)
+    return serverMessage === "Validation failed"
+      ? "Please check the information you entered and try again."
+      : serverMessage || "Please check the information you entered.";
+  if (status === 429) return "Too many tries. Please wait a little while and try again.";
+  if (status >= 500)
+    return "Something went wrong, but your information is safe. Please try again.";
+  return serverMessage || "We could not finish that. Please try again.";
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiUrl}${path}`, {
-    ...init,
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
-  });
-  const body = response.status === 204 ? null : await response.json();
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}${path}`, {
+      ...init,
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+        ...init?.headers,
+      },
+    });
+  } catch {
+    throw new Error(
+      "We could not connect. Check your internet connection and try again.",
+    );
+  }
+  let body: { data?: T; error?: string } | null = null;
+  if (response.status !== 204) {
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+  }
   if (
     response.status === 401 &&
     !path.startsWith("/auth/") &&
@@ -21,7 +64,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     window.dispatchEvent(new Event("origin:unauthorized"));
   }
   if (!response.ok)
-    throw new Error(body?.error ?? "The operation could not be completed");
+    throw new Error(friendlyError(response.status, body?.error));
   return body?.data as T;
 }
 
@@ -42,6 +85,44 @@ export const api = {
   logout: async () => {
     await request<never>("/auth/logout", { method: "POST" });
   },
+  notifications: () =>
+    request<{ unreadCount: number; items: AppNotification[] }>(
+      "/notifications",
+    ),
+  markNotificationRead: (id: number) =>
+    request<{ ok: true }>(`/notifications/${id}/read`, { method: "PATCH" }),
+  markAllNotificationsRead: () =>
+    request<{ ok: true }>("/notifications/read-all", { method: "POST" }),
+  pushConfig: () =>
+    request<{ available: boolean; publicKey: string }>(
+      "/notifications/push-config",
+    ),
+  pushSubscriptionStatus: (endpoint: string) =>
+    request<{ saved: boolean; deviceName: string; browserName: string }>(
+      "/notifications/push-subscriptions/status",
+      {
+        method: "POST",
+        body: JSON.stringify({ endpoint }),
+      },
+    ),
+  savePushSubscription: (
+    subscription: PushSubscriptionJSON,
+    device: {
+      deviceName: string;
+      browserName: string;
+      platformName: string;
+      persistAfterLogout: boolean;
+    },
+  ) =>
+    request<{ ok: true }>("/notifications/push-subscriptions", {
+      method: "POST",
+      body: JSON.stringify({ ...subscription, ...device }),
+    }),
+  removePushSubscription: (endpoint: string) =>
+    request<void>("/notifications/push-subscriptions", {
+      method: "DELETE",
+      body: JSON.stringify({ endpoint }),
+    }),
   ledger: () => request<Ledger>("/ledger"),
   addCategory: (data: {
     categoryKey: CategoryKey;
