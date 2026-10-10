@@ -203,6 +203,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
+  deleteStone: (stoneId: string) =>
+    request<void>(`/stones/${encodeURIComponent(stoneId)}`, {
+      method: "DELETE",
+    }),
   addStoneImages: (
     stoneId: string,
     images: Array<{ dataUrl: string; captured: boolean }>,

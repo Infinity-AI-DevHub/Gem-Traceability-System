@@ -24,6 +24,7 @@ export const requireAuth: RequestHandler = async (request, _response, next) => {
     _response.locals.auditUser = {
       id: Number(rows[0].id),
       name: rows[0].display_name || rows[0].username,
+      role: rows[0].role,
     };
     // Refresh the persistent cookie whenever the application is actively used.
     // The database session itself has no automatic expiry.

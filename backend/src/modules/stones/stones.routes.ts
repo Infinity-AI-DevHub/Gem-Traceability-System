@@ -165,6 +165,69 @@ stonesRouter.delete(
   }),
 );
 
+stonesRouter.delete(
+  "/:stoneId",
+  asyncHandler(async (request, response) => {
+    const id = stoneId.parse(request.params.stoneId);
+    if (response.locals.auditUser?.role !== "ADMIN")
+      throw new HttpError(403, "Only an administrator can delete a stone");
+
+    const connection = await pool.getConnection();
+    let imagePaths: unknown[] = [];
+    try {
+      await connection.beginTransaction();
+      const [stones] = await connection.execute<RowDataPacket[]>(
+        "SELECT id FROM stones WHERE id=? FOR UPDATE",
+        [id],
+      );
+      if (!stones[0]) throw new HttpError(404, `Stone ${id} was not found`);
+
+      const [dependencies] = await connection.query<RowDataPacket[]>(
+        `SELECT
+          (SELECT COUNT(*) FROM workshop_jobs WHERE stone_id=?) workshopJobs,
+          (SELECT COUNT(*) FROM sales WHERE stone_id=?) sales,
+          (SELECT COUNT(*) FROM salesman_handovers WHERE stone_id=?) salesmanHandovers,
+          (SELECT COUNT(*) FROM direct_sales WHERE stone_id=?) directSales,
+          (SELECT COUNT(*) FROM jewellery_jobs WHERE stone_id=?) jewelleryJobs,
+          (SELECT COUNT(*) FROM jewellery_profiles WHERE stone_id=?) jewelleryProfiles,
+          (SELECT COUNT(*) FROM promotion_handovers WHERE stone_id=?) promotionHandovers`,
+        [id, id, id, id, id, id, id],
+      );
+      const dependencyCount = Object.values(dependencies[0] ?? {}).reduce(
+        (total, value) => total + Number(value ?? 0),
+        0,
+      );
+      if (dependencyCount > 0)
+        throw new HttpError(
+          409,
+          "This stone cannot be deleted because work, handover, jewellery or sale records are connected to it.",
+        );
+
+      const [images] = await connection.execute<RowDataPacket[]>(
+        "SELECT file_path FROM stone_images WHERE stone_id=?",
+        [id],
+      );
+      imagePaths = images.map((image) => image.file_path);
+      await connection.execute("DELETE FROM lifecycle_events WHERE stone_id=?", [id]);
+      const [result] = await connection.execute<ResultSetHeader>(
+        "DELETE FROM stones WHERE id=?",
+        [id],
+      );
+      if (result.affectedRows !== 1)
+        throw new HttpError(404, `Stone ${id} was not found`);
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+    await Promise.allSettled(imagePaths.map((path) => removeStoredImage(path)));
+    response.status(204).send();
+  }),
+);
+
 stonesRouter.get(
   "/:stoneId",
   asyncHandler(async (request, response) => {

@@ -481,6 +481,8 @@ export default function Home({
     [devicePromptOpen, setDevicePromptOpen] = useState(false),
     [passwordOpen, setPasswordOpen] = useState(false),
     [passwordSaving, setPasswordSaving] = useState(false),
+    [deleteTarget, setDeleteTarget] = useState<Stone | null>(null),
+    [stoneDeleting, setStoneDeleting] = useState(false),
     [savedDevice, setSavedDevice] = useState(false),
     [pushState, setPushState] = useState<
       "checking" | "on" | "off" | "blocked" | "unsupported" | "unavailable"
@@ -871,6 +873,22 @@ export default function Home({
       })
       .catch((error) => fail(error, "We could not save this stock check. Please try again."));
   };
+  const deleteStone = async () => {
+    if (!deleteTarget || stoneDeleting) return;
+    setStoneDeleting(true);
+    try {
+      const deletedId = deleteTarget.id;
+      await api.deleteStone(deletedId);
+      setDeleteTarget(null);
+      await refresh();
+      navigate("inventory");
+      toast.success(`${deletedId} was permanently deleted.`);
+    } catch (error) {
+      fail(error, "We could not delete this stone. Please try again.");
+    } finally {
+      setStoneDeleting(false);
+    }
+  };
   if (authChecking)
     return (
       <main className="auth-loading" aria-label="Checking secure session">
@@ -939,7 +957,15 @@ export default function Home({
       setPasswordSaving(false);
     }
   };
-  const actions = { navigate, open, edit, saveStone, download, flash };
+  const actions = {
+    navigate,
+    open,
+    edit,
+    requestStoneDeletion: (item: Stone) => setDeleteTarget(item),
+    saveStone,
+    download,
+    flash,
+  };
   return (
     <div className="app-shell ops-shell">
       {menu && (
@@ -1152,6 +1178,49 @@ export default function Home({
           error={operation ? notice : ""}
         />
       )}
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open && !stoneDeleting) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent className="delete-stone-dialog">
+          <DialogHeader>
+            <DialogTitle>Delete this stone?</DialogTitle>
+            <DialogDescription>
+              {deleteTarget
+                ? `${deleteTarget.id} · ${deleteTarget.type} will be permanently removed.`
+                : "This stone will be permanently removed."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="delete-stone-warning">
+            <AlertTriangle size={21} />
+            <p>
+              This cannot be undone. Stones connected to workshop jobs,
+              handovers, jewellery or sales cannot be deleted.
+            </p>
+          </div>
+          <div className="account-dialog-actions">
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={stoneDeleting}
+              onClick={() => setDeleteTarget(null)}
+            >
+              Keep stone
+            </button>
+            <button
+              type="button"
+              className="danger-button"
+              disabled={stoneDeleting}
+              onClick={() => void deleteStone()}
+            >
+              <Trash2 size={16} />
+              {stoneDeleting ? "Deleting…" : "Delete permanently"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={passwordOpen} onOpenChange={setPasswordOpen}>
         <DialogContent className="account-dialog">
           <DialogHeader>
@@ -1308,6 +1377,7 @@ type Actions = {
   navigate: (p: Page, id?: string) => void;
   open: (o: Operation, id?: string) => void;
   edit: (id: string) => void;
+  requestStoneDeletion: (stone: Stone) => void;
   saveStone: (
     form: FormData,
     photos: PhotoDraft[],
@@ -2303,6 +2373,12 @@ function StoneDetail({
             onClick={() => actions.edit(stone.id)}
           >
             <Pencil size={17} /> Edit details
+          </button>
+          <button
+            className="danger-button stone-delete-button"
+            onClick={() => actions.requestStoneDeletion(stone)}
+          >
+            <Trash2 size={17} /> Delete stone
           </button>
         </div>
       </div>
