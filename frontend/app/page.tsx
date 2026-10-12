@@ -52,7 +52,7 @@ import {
   type Ledger,
   type Stone,
 } from "./demo-data";
-import { api, type AppNotification } from "./api";
+import { api, errorMessage, type AppNotification } from "./api";
 
 type Page =
   | "dashboard"
@@ -491,7 +491,7 @@ export default function Home({
   const stone =
     ledger.stones.find((s) => s.id === selected) || ledger.stones[0];
   const fail = (error: unknown, fallback: string) => {
-    const message = error instanceof Error ? error.message : fallback;
+    const message = errorMessage(error, fallback);
     setNotice(message);
     toast.error(message);
   };
@@ -2788,7 +2788,14 @@ function CategorySelect({
                   await refresh();
                   toast.success(`${created.name} added to ${categoryLabels[categoryKey].toLowerCase()}.`);
                 })
-                .catch((error) => toast.error(error instanceof Error ? error.message : "Category could not be added"));
+                .catch((error) =>
+                  toast.error(
+                    errorMessage(
+                      error,
+                      "We could not add this category item. Check the name and try again.",
+                    ),
+                  ),
+                );
             }}
           >
             Add
@@ -2837,6 +2844,7 @@ async function squarePhoto(file: File) {
 }
 
 type BatchIntakeRow = { id: string };
+type BatchSellerMode = "single" | "multiple";
 
 function SubmissionProgress({ label }: { label: string }) {
   return (
@@ -2858,9 +2866,61 @@ function BatchIntake({ sellers, categories, refresh, save, cancel }: {
   const newRow = (): BatchIntakeRow => ({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` });
   const [rows, setRows] = useState<BatchIntakeRow[]>(() => [newRow(), newRow()]);
   const [photos, setPhotos] = useState<Record<string, PhotoDraft[]>>({});
+  const [sellerMode, setSellerMode] = useState<BatchSellerMode | null>(null);
+  const [singleSeller, setSingleSeller] = useState("");
+  const [rowSellers, setRowSellers] = useState<Record<string, string>>({});
+  const [sellerCreator, setSellerCreator] = useState<"single" | string | null>(null);
+  const [sellerCreating, setSellerCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const field = (name: string, row: BatchIntakeRow) => `${name}_${row.id}`;
+  const sellerOptions = sellers.map((item) => ({
+    value: String(item.id),
+    label: `${item.name}${item.locality ? ` · ${item.locality}` : ""}`,
+    subtitle: "Supplier",
+    images: item.images.map((image) => image.url),
+    details: [
+      ["Name", item.name],
+      ["Phone", item.phone],
+      ["Email", item.email],
+      ["Locality", item.locality],
+      ["Notes", item.notes],
+    ] as Array<[string, string]>,
+  }));
+  const selectedSellerName = (id: string) =>
+    sellers.find((seller) => String(seller.id) === id)?.name ?? "";
+  const createSeller = async (form: FormData) => {
+    if (!sellerCreator || sellerCreating) return;
+    setSellerCreating(true);
+    try {
+      const created = await api.createDirectory("sellers", {
+        name: txt(form.get("name")),
+        phone: txt(form.get("phone")) || null,
+        email: txt(form.get("email")) || null,
+        locality: txt(form.get("locality")) || null,
+        notes: txt(form.get("notes")) || null,
+      });
+      const sellerId = String(created.id);
+      if (sellerCreator === "single") setSingleSeller(sellerId);
+      else
+        setRowSellers((current) => ({
+          ...current,
+          [sellerCreator]: sellerId,
+        }));
+      setSellerCreator(null);
+      await refresh();
+      toast.success("Seller / source created and selected.");
+    } catch (error) {
+      toast.error(
+        errorMessage(
+          error,
+          "We could not create this seller / source. Check the details and try again.",
+        ),
+      );
+    } finally {
+      setSellerCreating(false);
+    }
+  };
   const addImages = async (rowId: string, files: FileList | null, captured: boolean) => {
     if (!files?.length) return;
     const remaining = 4 - (photos[rowId]?.length ?? 0);
@@ -2868,24 +2928,136 @@ function BatchIntake({ sellers, categories, refresh, save, cancel }: {
     try {
       const prepared = await Promise.all(Array.from(files).slice(0, remaining).map(async (file) => ({ dataUrl: await squarePhoto(file), captured })));
       setPhotos((all) => ({ ...all, [rowId]: [...(all[rowId] ?? []), ...prepared] }));
-    } catch (error) { toast.error(error instanceof Error ? error.message : "Image could not be prepared"); }
+    } catch (error) {
+      toast.error(
+        errorMessage(
+          error,
+          "We could not prepare this image. Choose another image and try again.",
+        ),
+      );
+    }
   };
   const submit = async (form: FormData) => {
     if (savingRef.current) return;
+    if (!sellerMode) {
+      toast.error("Choose whether these stones have one seller / source or different sellers.");
+      return;
+    }
+    if (sellerMode === "single" && !singleSeller) {
+      toast.error("Choose the seller / source for this intake before adding the stones.");
+      return;
+    }
+    if (
+      sellerMode === "multiple" &&
+      rows.some((row) => !rowSellers[row.id])
+    ) {
+      toast.error("Choose a seller / source for every stone before registering them.");
+      return;
+    }
     savingRef.current = true;
     const stones = rows.map((row) => ({
       gemType: txt(form.get(field("type", row))), origin: txt(form.get(field("origin", row))), weight: number(form.get(field("weight", row))),
       color: txt(form.get(field("color", row))) || null, shape: txt(form.get(field("shape", row))) || null, cutStyle: txt(form.get(field("cut", row))) || null,
       purchaseCost: number(form.get(field("purchase", row))), treatmentDisclosure: txt(form.get(field("treatment", row))) || "Not assessed",
-      certificateReference: txt(form.get(field("certificate", row))) || null, sellerId: number(form.get(field("seller", row))) || null,
+      certificateReference: txt(form.get(field("certificate", row))) || null,
+      sellerId: number(
+        sellerMode === "single" ? singleSeller : rowSellers[row.id],
+      ),
       locationName: txt(form.get(field("location", row))) || "Main vault · Intake", acquiredOn: txt(form.get(field("date", row))) || today(),
       notes: txt(form.get(field("notes", row))) || null, images: (photos[row.id] ?? []).map(({ dataUrl, captured }) => ({ dataUrl, captured })),
     }));
     setSaving(true);
     try { await save(stones); } finally { savingRef.current = false; setSaving(false); }
   };
+  if (!sellerMode)
+    return (
+      <section className="batch-source-choice" aria-labelledby="batch-source-title">
+        <div className="batch-source-heading">
+          <span>STEP 1 OF 2</span>
+          <h2 id="batch-source-title">Where are these stones coming from?</h2>
+          <p>Choose how sellers or sources should be assigned to this intake.</p>
+        </div>
+        <div className="batch-source-options">
+          <button type="button" onClick={() => setSellerMode("single")}>
+            <Users size={24} />
+            <span>
+              <strong>One seller / source for all stones</strong>
+              <small>Choose one seller once and apply it to every stone.</small>
+            </span>
+            <ArrowRight size={19} />
+          </button>
+          <button type="button" onClick={() => setSellerMode("multiple")}>
+            <Users size={24} />
+            <span>
+              <strong>Different sellers / sources</strong>
+              <small>Choose a seller separately inside every stone record.</small>
+            </span>
+            <ArrowRight size={19} />
+          </button>
+        </div>
+        <button type="button" className="ops-secondary batch-source-cancel" onClick={cancel}>
+          Cancel intake
+        </button>
+      </section>
+    );
+
+  const stonesReady = sellerMode === "multiple" || Boolean(singleSeller);
+
   return (
     <form className="batch-intake" action={submit}>
+      <section className="batch-source-panel panel">
+        <div className="batch-source-panel-copy">
+          <span>STEP 1 · SOURCE</span>
+          <strong>
+            {sellerMode === "single"
+              ? "One seller / source for every stone"
+              : "Choose a seller / source for each stone"}
+          </strong>
+          <small>
+            {sellerMode === "single"
+              ? "This seller will be recorded on every stone in this intake."
+              : "Each stone can come from a different seller or source."}
+          </small>
+        </div>
+        {sellerMode === "single" && (
+          <div className="batch-seller-control">
+            <DetailedSelect
+              value={singleSeller}
+              onValueChange={setSingleSeller}
+              required
+              placeholder="Choose seller / source"
+              options={sellerOptions}
+            />
+            <button
+              type="button"
+              className="category-add-button"
+              onClick={() => setSellerCreator("single")}
+              aria-label="Add a new seller or source"
+              title="Add a new seller or source"
+            >
+              <Plus size={17} />
+            </button>
+          </div>
+        )}
+        <button
+          type="button"
+          className="batch-change-source"
+          onClick={() => setSellerMode(null)}
+        >
+          Change seller setup
+        </button>
+      </section>
+      {!stonesReady && (
+        <div className="batch-source-prompt" role="status">
+          <Users size={21} />
+          <div>
+            <strong>Choose or create the seller / source to continue</strong>
+            <small>The stone forms will appear after the seller is selected.</small>
+          </div>
+        </div>
+      )}
+      {stonesReady && (
+        <>
       <div className="batch-intake-summary">
         <div><span>{rows.length}</span><strong>stones in this intake</strong><small>All records save together or none are saved.</small></div>
         <button type="button" className="ops-secondary" onClick={() => setRows((current) => [...current, newRow()])} disabled={rows.length >= 20}><Plus size={17} /> Add another stone</button>
@@ -2895,14 +3067,50 @@ function BatchIntake({ sellers, categories, refresh, save, cancel }: {
           <details className="panel batch-stone-card" key={row.id}>
             <summary>
               <span className="batch-number">{index + 1}</span>
-              <span><strong>Stone {index + 1}</strong><small>Identity, measurements and purchase information</small></span>
+              <span>
+                <strong>Stone {index + 1}</strong>
+                <small>
+                  {sellerMode === "single"
+                    ? `Seller / source: ${selectedSellerName(singleSeller)}`
+                    : rowSellers[row.id]
+                      ? `Seller / source: ${selectedSellerName(rowSellers[row.id]!)}`
+                      : "Choose a seller / source for this stone"}
+                </small>
+              </span>
               {rows.length > 2 && <button type="button" className="batch-remove" onClick={(event) => { event.preventDefault(); setRows((current) => current.filter((item) => item.id !== row.id)); setPhotos((current) => { const next = { ...current }; delete next[row.id]; return next; }); }}><Trash2 size={15} /> Remove</button>}
             </summary>
             <div className="batch-stone-fields">
               <label>Gem type *<CategorySelect name={field("type", row)} categoryKey="GEM_TYPE" categories={categories} required placeholder="Select gem type" refresh={refresh} /></label>
               <label>Weight · ct *<input name={field("weight", row)} type="number" min="0.001" step="0.001" required placeholder="0.000" /></label>
               <label>Origin / locality *<CategorySelect name={field("origin", row)} categoryKey="ORIGIN" categories={categories} required placeholder="Select origin or locality" refresh={refresh} /></label>
-              <label>Supplier<DetailedSelect name={field("seller", row)} placeholder="No supplier selected" options={sellers.map((item) => ({ value: String(item.id), label: item.name, subtitle: "Supplier", images: item.images.map((image) => image.url), details: [["Phone", item.phone], ["Email", item.email], ["Locality", item.locality], ["Notes", item.notes]] }))} /></label>
+              {sellerMode === "multiple" && (
+                <label>
+                  Seller / source *
+                  <div className="batch-seller-control">
+                    <DetailedSelect
+                      value={rowSellers[row.id] ?? ""}
+                      onValueChange={(value) =>
+                        setRowSellers((current) => ({
+                          ...current,
+                          [row.id]: value,
+                        }))
+                      }
+                      required
+                      placeholder="Choose seller / source"
+                      options={sellerOptions}
+                    />
+                    <button
+                      type="button"
+                      className="category-add-button"
+                      onClick={() => setSellerCreator(row.id)}
+                      aria-label={`Add a new seller or source for stone ${index + 1}`}
+                      title="Add a new seller or source"
+                    >
+                      <Plus size={17} />
+                    </button>
+                  </div>
+                </label>
+              )}
               <label>Purchase date<input name={field("date", row)} type="date" defaultValue={today()} /></label>
               <label>Purchase cost · LKR<input name={field("purchase", row)} type="number" min="0" defaultValue="0" /></label>
               <label>Shape<CategorySelect name={field("shape", row)} categoryKey="SHAPE" categories={categories} placeholder="Select shape" refresh={refresh} /></label>
@@ -2926,6 +3134,60 @@ function BatchIntake({ sellers, categories, refresh, save, cancel }: {
         <button type="button" className="ops-secondary" onClick={cancel} disabled={saving}>Cancel</button>
         <button type="submit" className="primary-button" disabled={saving}>{saving ? "Saving stones…" : `Register ${rows.length} stones`} <ArrowRight size={17} /></button>
       </div>
+        </>
+      )}
+      <Dialog
+        open={Boolean(sellerCreator)}
+        onOpenChange={(open) => {
+          if (!open && !sellerCreating) setSellerCreator(null);
+        }}
+      >
+        <DialogContent className="ops-dialog compact-dialog batch-seller-dialog">
+          <DialogHeader>
+            <DialogTitle>Add a new seller / source</DialogTitle>
+            <DialogDescription>
+              This seller will be saved to the directory and selected for this intake.
+            </DialogDescription>
+          </DialogHeader>
+          <form action={createSeller}>
+            <div className="ops-dialog-fields">
+              <label>
+                Seller / source name *
+                <input name="name" required placeholder="Person or business name" />
+              </label>
+              <label>
+                Phone
+                <input name="phone" type="tel" placeholder="Contact number" />
+              </label>
+              <label>
+                Email
+                <input name="email" type="email" placeholder="Email address" />
+              </label>
+              <label>
+                Locality
+                <input name="locality" placeholder="Town or district" />
+              </label>
+              <label className="ops-full">
+                Notes
+                <textarea name="notes" rows={2} placeholder="Optional supplier notes" />
+              </label>
+            </div>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="ops-secondary"
+                disabled={sellerCreating}
+                onClick={() => setSellerCreator(null)}
+              >
+                Cancel
+              </button>
+              <button className="primary-button" disabled={sellerCreating}>
+                {sellerCreating ? "Saving seller…" : "Save and select seller"}
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }
@@ -2995,10 +3257,10 @@ function Intake({
           `${prepared.length} stone image${prepared.length === 1 ? "" : "s"} added.`,
         );
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "The image could not be prepared";
+      const message = errorMessage(
+        error,
+        "We could not prepare this image. Choose another image and try again.",
+      );
       setPhotoError(message);
       toast.error(message);
     }
@@ -3216,9 +3478,10 @@ function Intake({
                           )
                           .catch((error) =>
                             toast.error(
-                              error instanceof Error
-                                ? error.message
-                                : "Seller image could not be prepared",
+                              errorMessage(
+                                error,
+                                "We could not prepare the supplier image. Choose another image and try again.",
+                              ),
                             ),
                           );
                       }}
@@ -3243,9 +3506,10 @@ function Intake({
                           )
                           .catch((error) =>
                             toast.error(
-                              error instanceof Error
-                                ? error.message
-                                : "Seller photo could not be prepared",
+                              errorMessage(
+                                error,
+                                "We could not prepare the supplier photo. Take another photo and try again.",
+                              ),
                             ),
                           );
                       }}
@@ -4191,7 +4455,14 @@ function Jewellery({
                         await refresh();
                         toast.success("Jewellery images saved.");
                       })
-                      .catch((error) => toast.error(error instanceof Error ? error.message : "Image upload failed"));
+                      .catch((error) =>
+                        toast.error(
+                          errorMessage(
+                            error,
+                            "We could not save the jewellery images. Please try again.",
+                          ),
+                        ),
+                      );
                   }}
                 />
               </label>
@@ -4211,7 +4482,14 @@ function Jewellery({
                         await refresh();
                         toast.success("Jewellery photo saved.");
                       })
-                      .catch((error) => toast.error(error instanceof Error ? error.message : "Photo capture failed"));
+                      .catch((error) =>
+                        toast.error(
+                          errorMessage(
+                            error,
+                            "We could not save this jewellery photo. Take another photo and try again.",
+                          ),
+                        ),
+                      );
                   }}
                 />
               </label>
@@ -4581,7 +4859,12 @@ function Categories({
       await refresh();
       toast.success(editingItem ? "Category item updated." : "Category item added.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Category could not be saved");
+      toast.error(
+        errorMessage(
+          error,
+          "We could not save this category item. Check the information and try again.",
+        ),
+      );
     }
   };
   return (
@@ -4608,7 +4891,20 @@ function Categories({
                       <button type="button" onClick={() => setEditingItem(item)} aria-label={`Edit ${item.name}`}><Pencil size={15} /><span>Edit</span></button>
                       <button type="button" onClick={() => {
                         if (!window.confirm(`Remove ${item.name} from active choices? Existing records will be kept.`)) return;
-                        void api.deleteCategory(item.id).then(async () => { await refresh(); toast.success("Category item removed from active choices."); }).catch((error) => toast.error(error instanceof Error ? error.message : "Could not remove category"));
+                        void api
+                          .deleteCategory(item.id)
+                          .then(async () => {
+                            await refresh();
+                            toast.success("Category item removed from active choices.");
+                          })
+                          .catch((error) =>
+                            toast.error(
+                              errorMessage(
+                                error,
+                                "We could not remove this category item. Please try again.",
+                              ),
+                            ),
+                          );
                       }} aria-label={`Remove ${item.name}`}><Trash2 size={15} /><span>Remove</span></button>
                     </span>
                   </div>
@@ -4676,7 +4972,14 @@ function Directory({ ledger, refresh }: { ledger: Ledger; refresh: () => Promise
       closeEditor();
       await refresh();
       toast.success(editingContact ? "Directory contact updated." : "Directory contact added.");
-    } catch (error) { toast.error(error instanceof Error ? error.message : "Contact could not be saved"); }
+    } catch (error) {
+      toast.error(
+        errorMessage(
+          error,
+          "We could not save this contact. Check the information and try again.",
+        ),
+      );
+    }
   };
   return (
     <>
@@ -4720,7 +5023,7 @@ function Directory({ ledger, refresh }: { ledger: Ledger; refresh: () => Promise
             <span>{c.locality}</span>
             <small>{c.phone}</small>
             {c.email && <small>{c.email}</small>}
-            <div className="contact-card-actions"><button type="button" onClick={() => setEditingContact(c)}><Pencil size={15} /> Edit</button><button type="button" onClick={() => { if (!window.confirm(`Remove ${c.name} from the active directory?`)) return; void api.deleteDirectory(c.entity, c.id).then(async () => { await refresh(); toast.success("Contact removed from the active directory."); }).catch((error) => toast.error(error instanceof Error ? error.message : "Contact could not be removed")); }}><Trash2 size={15} /> Remove</button></div>
+            <div className="contact-card-actions"><button type="button" onClick={() => setEditingContact(c)}><Pencil size={15} /> Edit</button><button type="button" onClick={() => { if (!window.confirm(`Remove ${c.name} from the active directory?`)) return; void api.deleteDirectory(c.entity, c.id).then(async () => { await refresh(); toast.success("Contact removed from the active directory."); }).catch((error) => toast.error(errorMessage(error, "We could not remove this contact. Please try again."))); }}><Trash2 size={15} /> Remove</button></div>
           </article>
         ))}
       </div>

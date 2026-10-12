@@ -16,7 +16,10 @@ export const requireTrustedBrowserRequest: RequestHandler = (
 
   try {
     if (request.get("X-Requested-With") !== "XMLHttpRequest")
-      throw new HttpError(403, "This request could not be verified");
+      throw new HttpError(
+        403,
+        "For your security, this request was blocked. Refresh the page and try again.",
+      );
 
     const origin = request.get("Origin");
     const referer = request.get("Referer");
@@ -26,11 +29,17 @@ export const requireTrustedBrowserRequest: RequestHandler = (
       try {
         sourceOrigin = new URL(referer).origin;
       } catch {
-        throw new HttpError(403, "This request could not be verified");
+        throw new HttpError(
+          403,
+          "For your security, this request was blocked. Refresh the page and try again.",
+        );
       }
     }
     if (!sourceOrigin || sourceOrigin !== new URL(env.FRONTEND_ORIGIN).origin)
-      throw new HttpError(403, "This request could not be verified");
+      throw new HttpError(
+        403,
+        "For your security, this request was blocked. Refresh the page and try again.",
+      );
     next();
   } catch (error) {
     next(error);

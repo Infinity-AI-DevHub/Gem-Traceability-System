@@ -19,7 +19,11 @@ export async function storeImage(
   collection: "stones" | "sellers" | "jewellery",
 ) {
   const match = dataUrl.match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
-  if (!match) throw new HttpError(422, "Unsupported image format");
+  if (!match)
+    throw new HttpError(
+      422,
+      "This image type is not supported. Choose a JPEG, PNG, or WebP image.",
+    );
   const mimeType = match[1]!;
   const data = Buffer.from(match[2]!, "base64");
   if (data.length > 2_000_000)
@@ -33,7 +37,11 @@ export async function storeImageBuffer(
   collection: "stones" | "sellers" | "jewellery",
 ) {
   const extension = extensions[mimeType];
-  if (!extension) throw new HttpError(422, "Unsupported image format");
+  if (!extension)
+    throw new HttpError(
+      422,
+      "This image type is not supported. Choose a JPEG, PNG, or WebP image.",
+    );
   const directory = resolve(uploadRoot, collection);
   await mkdir(directory, { recursive: true });
   const fileName = `${randomUUID()}.${extension}`;

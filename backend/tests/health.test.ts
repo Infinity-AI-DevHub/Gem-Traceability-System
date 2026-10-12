@@ -22,7 +22,9 @@ describe("health endpoint", () => {
       .post("/api/v1/auth/login")
       .send({ username: "admin", password: "not-the-password" });
     expect(response.status).toBe(403);
-    expect(response.body.error).toBe("This request could not be verified");
+    expect(response.body.error).toBe(
+      "For your security, this request was blocked. Refresh the page and try again.",
+    );
   });
 
   it("rejects writes from an untrusted origin", async () => {

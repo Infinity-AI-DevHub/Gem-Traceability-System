@@ -319,7 +319,10 @@ commandsRouter.post(
           [buyerName],
         );
         if (!buyers[0])
-          throw new HttpError(500, "Buyer record could not be created");
+          throw new HttpError(
+            500,
+            "We could not create the buyer record. Nothing was saved. Please try again.",
+          );
         const saleId = `DIR-${Date.now()}`;
         await db.execute(
           `INSERT INTO direct_sales
@@ -541,7 +544,11 @@ commandsRouter.post(
         );
         title = "Payment received";
         detail = String(amount);
-      } else throw new HttpError(422, "Unsupported operation");
+      } else
+        throw new HttpError(
+          422,
+          "This action is not available. Refresh the page and choose the action again.",
+        );
       const updatedStone = await requireStone(stoneId, db);
       const before = stoneSnapshot(stone);
       const after = stoneSnapshot(updatedStone);

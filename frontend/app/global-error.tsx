@@ -6,9 +6,12 @@ export default function GlobalError({ reset }: { reset: () => void }) {
       <body>
         <main className="friendly-error-page">
           <div>
-            <span>We need a moment</span>
-            <h1>The app could not open correctly.</h1>
-            <p>Your information is safe. Tap below to try again.</p>
+            <span>The app did not finish loading</span>
+            <h1>Origin could not start this screen.</h1>
+            <p>
+              Check your internet connection, then try again. Any action that
+              already showed a success message remains saved.
+            </p>
             <button onClick={reset}>Open the app again</button>
           </div>
         </main>

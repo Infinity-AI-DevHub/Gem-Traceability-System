@@ -135,7 +135,10 @@ authRouter.post(
           );
         }
       }
-      throw new HttpError(401, "Invalid username or password");
+      throw new HttpError(
+        401,
+        "The username or password is not correct. Check both and try again.",
+      );
     }
 
     const token = randomBytes(32).toString("base64url");
