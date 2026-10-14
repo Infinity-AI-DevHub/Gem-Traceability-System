@@ -11,6 +11,7 @@ const status: Record<string, string> = {
   RESERVED: "With Salesman",
   IN_CUTTING: "In Cutting",
   IN_TREATMENT: "In Treatment",
+  IN_WORKSHOP: "At Workshop",
   IN_JEWELLERY: "In Jewellery",
   JEWELLERY: "Jewellery",
   SOLD: "Sold",
@@ -18,7 +19,7 @@ const status: Record<string, string> = {
 };
 const jobStatus: Record<string, string> = {
   PENDING_DISPATCH: "Pending dispatch",
-  WITH_PROVIDER: "With provider",
+  WITH_PROVIDER: "With workshop",
   RETURNED: "Returned",
   CANCELLED: "Returned",
 };
@@ -207,7 +208,12 @@ ledgerRouter.get(
         jobs: jobs.map((j) => ({
           id: j.id,
           stoneId: j.stone_id,
-          kind: j.job_type === "CUTTING" ? "Cutting" : "Treatment",
+          kind:
+            j.job_type === "CUTTING"
+              ? "Cutting"
+              : j.job_type === "TREATMENT"
+                ? "Treatment"
+                : j.job_type,
           provider: j.provider_name,
           workshop: j.workshop_name,
           status: jobStatus[j.status],

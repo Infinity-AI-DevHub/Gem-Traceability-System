@@ -3,6 +3,7 @@ export type StoneStatus =
   | "With Salesman"
   | "In Cutting"
   | "In Treatment"
+  | "At Workshop"
   | "In Jewellery"
   | "Jewellery"
   | "Sold"
@@ -44,7 +45,7 @@ export type Event = {
 export type Job = {
   id: string;
   stoneId: string;
-  kind: "Cutting" | "Treatment";
+  kind: string;
   provider: string;
   workshop: string;
   status: "Pending dispatch" | "With provider" | "Returned";
@@ -195,7 +196,8 @@ export type CategoryKey =
   | "TREATMENT"
   | "METAL"
   | "METAL_PURITY"
-  | "PAYMENT_METHOD";
+  | "PAYMENT_METHOD"
+  | "PROCESS";
 export type CategoryItem = {
   id: number;
   categoryKey: CategoryKey;

@@ -105,6 +105,7 @@ const categoryLabels: Record<string, string> = {
   METAL: "metal type",
   METAL_PURITY: "metal purity",
   PAYMENT_METHOD: "payment method",
+  PROCESS: "process",
 };
 
 const duplicateConstraintMessages: Record<string, string> = {

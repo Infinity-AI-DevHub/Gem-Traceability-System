@@ -13,6 +13,7 @@ export const listStonesQuery = z.object({
       "RESERVED",
       "IN_CUTTING",
       "IN_TREATMENT",
+      "IN_WORKSHOP",
       "IN_JEWELLERY",
       "JEWELLERY",
       "SOLD",

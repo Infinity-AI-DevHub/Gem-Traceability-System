@@ -140,6 +140,7 @@ Its value must be:
 
 ```dotenv
 NEXT_PUBLIC_API_URL=https://inventory.1ctstore.com/api/v1
+NEXT_PUBLIC_APP_URL=https://inventory.1ctstore.com
 ```
 
 Protect the secrets:

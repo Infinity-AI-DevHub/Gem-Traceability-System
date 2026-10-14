@@ -91,9 +91,16 @@ commandsRouter.post(
         title = "Quality assessment recorded";
         detail = text(data.notes) || text(data.outcome);
       } else if (operation === "job") {
-        const kind = text(data.kind).toUpperCase();
-        if (!(["CUTTING", "TREATMENT"] as string[]).includes(kind))
-          throw new HttpError(422, "Select cutting or treatment");
+        const requestedKind = text(data.kind);
+        const [processes] = await db.query<RowDataPacket[]>(
+          `SELECT name FROM category_items
+           WHERE category_key='PROCESS' AND name=? AND active=TRUE LIMIT 1`,
+          [requestedKind],
+        );
+        if (!processes[0])
+          throw new HttpError(422, "Choose a process from the list");
+        const processName = String(processes[0].name);
+        const kind = processName.toUpperCase();
         if (stone.status !== "AVAILABLE")
           throw new HttpError(
             409,
@@ -107,30 +114,30 @@ commandsRouter.post(
           throw new HttpError(
             409,
             "Receive this item from the promotion company before starting a workshop job",
-          );
-        const workshopId = num(data.workshopId);
-        const providerId = num(data.providerId);
-        const [providers] = await db.query<RowDataPacket[]>(
-          `SELECT p.display_name provider_name,w.name workshop_name
-           FROM providers p JOIN workshops w ON w.id=p.workshop_id
-           WHERE p.id=? AND p.workshop_id=? AND p.active=TRUE AND w.active=TRUE
-             AND p.specialty IN (?, 'BOTH') AND w.workshop_type IN (?, 'BOTH') LIMIT 1`,
-          [providerId, workshopId, kind, kind],
         );
-        if (!providers[0])
+        const workshopId = num(data.workshopId);
+        const [workshops] = await db.query<RowDataPacket[]>(
+          `SELECT name workshop_name FROM workshops
+           WHERE id=? AND active=TRUE
+             AND (? NOT IN ('CUTTING','TREATMENT') OR workshop_type IN (?, 'BOTH', 'ALL'))
+           LIMIT 1`,
+          [workshopId, kind, kind],
+        );
+        if (!workshops[0])
           throw new HttpError(
             422,
-            "Select an active workshop and matching provider",
+            "Choose a workshop that can perform this process",
           );
-        const id = `${kind === "CUTTING" ? "CUT" : "TRT"}-${Date.now()}`;
+        const prefix = kind === "CUTTING" ? "CUT" : kind === "TREATMENT" ? "TRT" : "JOB";
+        const id = `${prefix}-${Date.now()}`;
         await db.execute(
           "INSERT INTO workshop_jobs (id,stone_id,job_type,workshop_id,provider_id,handover_on,due_on,outgoing_weight,estimated_cost,instructions) VALUES (?,?,?,?,?,?,?,?,?,?)",
           [
             id,
             stoneId,
-            kind,
+            processName,
             workshopId,
-            providerId,
+            null,
             text(data.handoverDate) || null,
             text(data.due) || null,
             stone.currentWeight,
@@ -139,10 +146,15 @@ commandsRouter.post(
           ],
         );
         await updateStoneState(db, stoneId, expectedVersion, {
-          status: kind === "CUTTING" ? "IN_CUTTING" : "IN_TREATMENT",
+          status:
+            kind === "CUTTING"
+              ? "IN_CUTTING"
+              : kind === "TREATMENT"
+                ? "IN_TREATMENT"
+                : "IN_WORKSHOP",
         });
-        title = `${text(data.kind)} job created`;
-        detail = `${id} · ${providers[0].workshop_name} · ${providers[0].provider_name}`;
+        title = `${processName} job created`;
+        detail = `${id} · ${workshops[0].workshop_name}`;
       } else if (operation === "dispatch") {
         const [jobs] = await db.query<RowDataPacket[]>(
           "SELECT * FROM workshop_jobs WHERE stone_id=? AND status='PENDING_DISPATCH' ORDER BY created_at DESC LIMIT 1",
@@ -153,7 +165,7 @@ commandsRouter.post(
           "UPDATE workshop_jobs SET status='WITH_PROVIDER',dispatched_at=NOW() WHERE id=?",
           [jobs[0].id],
         );
-        title = "Custody transferred to provider";
+        title = "Custody transferred to workshop";
         detail = text(data.handover);
       } else if (operation === "return") {
         const [jobs] = await db.query<RowDataPacket[]>(
@@ -183,7 +195,7 @@ commandsRouter.post(
           currentWeight: num(data.weight),
           locationId: receivingLocationId ?? undefined,
           treatmentDisclosure:
-            jobs[0].job_type === "TREATMENT"
+            String(jobs[0].job_type).toUpperCase() === "TREATMENT"
               ? text(data.treatment)
               : stone.treatmentDisclosure,
         });

@@ -67,6 +67,7 @@ const categoryKey = z.enum([
   "METAL",
   "METAL_PURITY",
   "PAYMENT_METHOD",
+  "PROCESS",
 ]);
 const categoryItem = z.object({
   categoryKey,

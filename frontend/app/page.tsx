@@ -25,6 +25,7 @@ import {
   Pencil,
   Plus,
   Printer,
+  ScanLine,
   Search,
   ShieldCheck,
   ShoppingBag,
@@ -95,6 +96,9 @@ type PhotoDraft = {
   dataUrl: string;
   captured: boolean;
 };
+const publicAppUrl = (
+  process.env.NEXT_PUBLIC_APP_URL ?? "https://inventory.1ctstore.com"
+).replace(/\/$/, "");
 const pageRoutes: Record<Exclude<Page, "stone">, string> = {
   dashboard: "/dashboard",
   inventory: "/stones",
@@ -446,6 +450,136 @@ function number(v: FormDataEntryValue | null) {
 function txt(v: FormDataEntryValue | null) {
   return String(v || "").trim();
 }
+
+function loginUrlForCurrentPage() {
+  if (window.location.pathname === "/login") return "/login";
+  const destination = `${window.location.pathname}${window.location.search}`;
+  return `/login?next=${encodeURIComponent(destination)}`;
+}
+
+function QrScannerDialog({
+  open,
+  close,
+  stones,
+  openStone,
+}: {
+  open: boolean;
+  close: () => void;
+  stones: Stone[];
+  openStone: (stoneId: string) => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const controlsRef = useRef<{ stop: () => void } | null>(null);
+  const foundRef = useRef(false);
+  const openStoneRef = useRef(openStone);
+  const [status, setStatus] = useState("Point the camera at a stone QR code.");
+  const [scannerError, setScannerError] = useState("");
+
+  useEffect(() => {
+    openStoneRef.current = openStone;
+  }, [openStone]);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    foundRef.current = false;
+    const videoElement = videoRef.current;
+
+    const findStone = (rawValue: string) => {
+      let stoneId = "";
+      try {
+        const scannedUrl = new URL(rawValue, window.location.origin);
+        const match = decodeURIComponent(scannedUrl.pathname).match(/^\/stones\/([^/]+)\/?$/);
+        stoneId = match?.[1] ?? "";
+      } catch {
+        stoneId = "";
+      }
+      if (!stoneId) {
+        // Older printed labels stored a small JSON identity instead of a URL.
+        try {
+          const legacy = JSON.parse(rawValue) as { stoneId?: string; productId?: string };
+          stoneId = legacy.stoneId ?? stones.find((item) => item.productId === legacy.productId)?.id ?? "";
+        } catch {
+          stoneId = "";
+        }
+      }
+      return stones.find((item) => item.id === stoneId || item.productId === rawValue);
+    };
+
+    void (async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("This browser cannot open the camera for QR scanning.");
+        }
+        const { BrowserQRCodeReader } = await import("@zxing/browser");
+        if (!active || !videoElement) return;
+        const reader = new BrowserQRCodeReader(undefined, {
+          delayBetweenScanAttempts: 180,
+          delayBetweenScanSuccess: 600,
+        });
+        controlsRef.current = await reader.decodeFromConstraints(
+          {
+            audio: false,
+            video: { facingMode: { ideal: "environment" } },
+          },
+          videoElement,
+          (result) => {
+            if (!result || foundRef.current) return;
+            const matchedStone = findStone(result.getText());
+            if (!matchedStone) {
+              setScannerError("This QR code does not match a stone in this system. Try another stone QR.");
+              return;
+            }
+            foundRef.current = true;
+            setStatus(`Found ${matchedStone.id}. Opening its record…`);
+            controlsRef.current?.stop();
+            window.setTimeout(() => openStoneRef.current(matchedStone.id), 250);
+          },
+        );
+      } catch (cameraError) {
+        if (!active) return;
+        setScannerError(
+          errorMessage(
+            cameraError,
+            "We could not open the camera. Allow camera access in your browser and try again.",
+          ),
+        );
+        setStatus("");
+      }
+    })();
+
+    return () => {
+      active = false;
+      controlsRef.current?.stop();
+      controlsRef.current = null;
+      const stream = videoElement?.srcObject;
+      if (stream instanceof MediaStream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, [open, stones]);
+
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && close()}>
+      <DialogContent className="qr-scanner-dialog">
+        <DialogHeader>
+          <DialogTitle>Scan a stone QR</DialogTitle>
+          <DialogDescription>
+            The matching stone record will open automatically.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="qr-camera-frame">
+          <video ref={videoRef} muted playsInline aria-label="Camera preview for scanning a stone QR code" />
+          <div className="qr-camera-target" aria-hidden="true"><ScanLine size={38} /></div>
+        </div>
+        {status && <p className="qr-scanner-status">{status}</p>}
+        {scannerError && <div className="qr-scanner-error"><AlertTriangle size={18} />{scannerError}</div>}
+        <button type="button" className="ops-secondary qr-scanner-close" onClick={close}>Cancel scanning</button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function Home({
   initialPage = "dashboard",
   initialStoneId = "",
@@ -478,6 +612,7 @@ export default function Home({
     [editing, setEditing] = useState<string | null>(initialEditing || null),
     [notifications, setNotifications] = useState<AppNotification[]>([]),
     [notificationOpen, setNotificationOpen] = useState(false),
+    [scannerOpen, setScannerOpen] = useState(false),
     [devicePromptOpen, setDevicePromptOpen] = useState(false),
     [passwordOpen, setPasswordOpen] = useState(false),
     [passwordSaving, setPasswordSaving] = useState(false),
@@ -539,7 +674,7 @@ export default function Home({
       } catch {
         if (!active) return;
         setLoggedIn(false);
-        if (!loginPage) router.replace("/login");
+        if (!loginPage) router.replace(loginUrlForCurrentPage());
       } finally {
         if (active) setAuthChecking(false);
       }
@@ -551,7 +686,8 @@ export default function Home({
   useEffect(() => {
     const unauthorized = () => {
       setLoggedIn(false);
-      router.replace("/login");
+      if (window.location.pathname === "/login") return;
+      router.replace(loginUrlForCurrentPage());
     };
     window.addEventListener("origin:unauthorized", unauthorized);
     return () =>
@@ -1068,6 +1204,15 @@ export default function Home({
             <span className="sync-state">
               <i /> MySQL connected
             </span>
+            <button
+              className="qr-scan-button"
+              onClick={() => setScannerOpen(true)}
+              aria-label="Scan a stone QR code"
+              title="Scan a stone QR code"
+            >
+              <ScanLine size={19} />
+              <span>Scan QR</span>
+            </button>
             <div className="notification-anchor">
               <button
                 className="notification-button"
@@ -1158,6 +1303,18 @@ export default function Home({
           )}
         </div>
       </main>
+      {scannerOpen && (
+        <QrScannerDialog
+          open
+          close={() => setScannerOpen(false)}
+          stones={ledger.stones}
+          openStone={(stoneId) => {
+            setScannerOpen(false);
+            navigate("stone", stoneId);
+            toast.success("Stone found. Its record is now open.");
+          }}
+        />
+      )}
       <MobileNav
         page={page}
         navigate={navigate}
@@ -1591,7 +1748,7 @@ function Dashboard({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
         id: job.id,
         stoneId: job.stoneId,
         title: `${job.kind} · ${job.id}`,
-        owner: `${job.workshop} · ${job.provider}`,
+        owner: job.workshop,
         kind: "workshop" as const,
         due: job.due,
         days: dueDays(job.due),
@@ -2026,6 +2183,7 @@ function Inventory({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
             "Available",
             "In Cutting",
             "In Treatment",
+            "At Workshop",
             "With Salesman",
             "On Hold",
             "Sold",
@@ -2293,6 +2451,7 @@ function StoneDetail({
   stone: Stone;
   actions: Actions;
 }) {
+  const stoneUrl = `${publicAppUrl}/stones/${encodeURIComponent(stone.id)}`;
   const events = ledger.events.filter((e) => e.stoneId === stone.id),
     jobs = ledger.jobs.filter((j) => j.stoneId === stone.id),
     salesmanHandovers = ledger.salesmanHandovers.filter(
@@ -2460,7 +2619,7 @@ function StoneDetail({
                       {j.id} · {j.kind}
                     </strong>
                     <small>
-                      {j.workshop} · {j.provider} · {j.status}
+                      {j.workshop} · {j.status}
                     </small>
                   </span>
                   <span>
@@ -2516,21 +2675,18 @@ function StoneDetail({
                 className="qr-code"
                 aria-label={`QR code for ${stone.productId}`}
               >
-                <QRCode
-                  value={JSON.stringify({
-                    system: "ORIGIN",
-                    productId: stone.productId,
-                    stoneId: stone.id,
-                    token: stone.qrToken,
-                  })}
-                  size={168}
-                  level="H"
-                  title={`Product ${stone.productId}`}
-                />
+                {stoneUrl && (
+                  <QRCode
+                    value={stoneUrl}
+                    size={168}
+                    level="H"
+                    title={`Open ${stone.id}`}
+                  />
+                )}
               </div>
               <strong>{stone.productId}</strong>
               <span>{stone.id}</span>
-              <small>Scan to identify this exact stone record.</small>
+              <small>Scan with this app or any phone camera to open this stone record.</small>
               <div className="qr-actions">
                 <button type="button" className="ops-secondary" onClick={downloadQr}>
                   <Download size={16} /> Download QR
@@ -2598,7 +2754,7 @@ function StoneDetail({
                   Clear hold
                 </Action>
               )}
-              {["In Cutting", "In Treatment"].includes(stone.status) && (
+              {["In Cutting", "In Treatment", "At Workshop"].includes(stone.status) && (
                 <Action onClick={() => actions.navigate("workshop")}>
                   Review active job
                 </Action>
@@ -2621,6 +2777,20 @@ const categoryLabels: Record<CategoryKey, string> = {
   METAL: "Jewellery metals",
   METAL_PURITY: "Metal purities",
   PAYMENT_METHOD: "Payment methods",
+  PROCESS: "Processes",
+};
+
+const categoryItemLabels: Record<CategoryKey, string> = {
+  GEM_TYPE: "gem type",
+  ORIGIN: "origin or locality",
+  SHAPE: "shape",
+  CUT: "cut type",
+  COLOR: "colour",
+  TREATMENT: "treatment",
+  METAL: "jewellery metal",
+  METAL_PURITY: "metal purity",
+  PAYMENT_METHOD: "payment method",
+  PROCESS: "process",
 };
 
 type DetailOption = {
@@ -2725,31 +2895,40 @@ function CategorySelect({
   categoryKey,
   categories,
   defaultValue = "",
+  value: controlledValue,
   required = false,
   placeholder,
   refresh,
+  onValueChange,
 }: {
   name: string;
   categoryKey: CategoryKey;
   categories: Ledger["categories"];
   defaultValue?: string;
+  value?: string;
   required?: boolean;
   placeholder: string;
   refresh: () => Promise<void>;
+  onValueChange?: (value: string) => void;
 }) {
   const [value, setValue] = useState(defaultValue);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const options = categories.filter((item) => item.categoryKey === categoryKey);
+  const selectedValue = controlledValue ?? value;
+  const changeValue = (nextValue: string) => {
+    if (controlledValue === undefined) setValue(nextValue);
+    onValueChange?.(nextValue);
+  };
   return (
     <div className="category-control">
       <div className="category-select-row">
         <DetailedSelect
           name={name}
-          value={value}
+          value={selectedValue}
           required={required}
           placeholder={placeholder}
-          onValueChange={setValue}
+          onValueChange={changeValue}
           options={options.map((item) => ({
             value: item.name,
             label: item.name,
@@ -2771,7 +2950,7 @@ function CategorySelect({
           <input
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
-            placeholder={`New ${categoryLabels[categoryKey].toLowerCase().replace(/s$/, "")}`}
+            placeholder={`New ${categoryItemLabels[categoryKey]}`}
             autoFocus
           />
           <button
@@ -2782,7 +2961,7 @@ function CategorySelect({
               void api
                 .addCategory({ categoryKey, name: newName.trim() })
                 .then(async (created) => {
-                  setValue(created.name);
+                  changeValue(created.name);
                   setNewName("");
                   setAdding(false);
                   await refresh();
@@ -3752,7 +3931,7 @@ function Workshop({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
         </div>
       </div>
       <div className="ops-filters">
-        {["Open", "Pending dispatch", "With provider", "Returned", "All"].map(
+        {["Open", "Pending dispatch", "With workshop", "Returned", "All"].map(
           (f) => (
             <button
               className={filter === f ? "selected" : ""}
@@ -3778,10 +3957,8 @@ function Workshop({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
               <StoneLink stone={stone} navigate={actions.navigate} />
               <div className="ops-job-facts">
                 <div>
-                  <span>Workshop / provider</span>
-                  <strong>
-                    {j.workshop} · {j.provider}
-                  </strong>
+                  <span>Workshop</span>
+                  <strong>{j.workshop}</strong>
                 </div>
                 <div>
                   <span>Handover / due back</span>
@@ -4609,6 +4786,7 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
               "With Salesman",
               "In Cutting",
               "In Treatment",
+              "At Workshop",
               "On Hold",
               "Sold",
             ].map((status) => {
@@ -4699,7 +4877,6 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                     "Stone",
                     "Type",
                     "Workshop",
-                    "Provider",
                     "Status",
                     "Handover date",
                     "Due",
@@ -4712,7 +4889,6 @@ function Reports({ ledger, actions }: { ledger: Ledger; actions: Actions }) {
                     j.stoneId,
                     j.kind,
                     j.workshop,
-                    j.provider,
                     j.status,
                     j.handoverDate,
                     j.due,
@@ -5068,14 +5244,33 @@ function OperationDialog({
   error: string;
   refresh: () => Promise<void>;
 }) {
-  const [jobKind, setJobKind] = useState<"Cutting" | "Treatment">("Cutting");
+  const [jobKind, setJobKind] = useState("Cutting");
   const [jobWorkshop, setJobWorkshop] = useState("");
+  const [addingWorkshop, setAddingWorkshop] = useState(false);
+  const [workshopCreating, setWorkshopCreating] = useState(false);
+  const [newWorkshop, setNewWorkshop] = useState({
+    name: "",
+    workshopType: "BOTH",
+    phone: "",
+    email: "",
+    address: "",
+  });
   const [buyerChoice, setBuyerChoice] = useState("");
+  const [salesmanChoice, setSalesmanChoice] = useState("");
+  const [addingSalesman, setAddingSalesman] = useState(false);
+  const [salesmanCreating, setSalesmanCreating] = useState(false);
+  const [newSalesman, setNewSalesman] = useState({
+    name: "",
+    phone: "",
+    email: "",
+    locality: "",
+    notes: "",
+  });
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const titles: Record<Operation, string> = {
     job: "Create workshop job",
-    dispatch: "Dispatch to provider",
+    dispatch: "Dispatch to workshop",
     return: "Receive and reconcile",
     custody: "Transfer custody",
     quality: "Record quality assessment",
@@ -5126,20 +5321,23 @@ function OperationDialog({
     operation === "direct-sale" ||
     operation === "jewellery-handover" ||
     operation === "promotion-handover";
-  const kindCode = jobKind === "Cutting" ? "CUTTING" : "TREATMENT";
+  const kindCode =
+    jobKind === "Cutting"
+      ? "CUTTING"
+      : jobKind === "Treatment"
+        ? "TREATMENT"
+        : "CUSTOM";
   const eligibleWorkshops = ledger.workshops.filter(
-    (workshop) => workshop.type === "BOTH" || workshop.type === kindCode,
+    (workshop) =>
+      kindCode === "CUSTOM"
+        ? workshop.type !== "JEWELLERY"
+        : [kindCode, "BOTH", "ALL"].includes(workshop.type),
   );
   const selectedWorkshop = eligibleWorkshops.some(
     (workshop) => String(workshop.id) === jobWorkshop,
   )
     ? jobWorkshop
     : String(eligibleWorkshops[0]?.id ?? "");
-  const eligibleProviders = ledger.providers.filter(
-    (provider) =>
-      String(provider.workshopId) === selectedWorkshop &&
-      (provider.specialty === "BOTH" || provider.specialty === kindCode),
-  );
   const allStoneOptions = ledger.stones.map((item): DetailOption => ({
       value: item.id,
       label: `${item.productId} · ${item.type} · ${item.weight.toFixed(2)} ct`,
@@ -5160,10 +5358,69 @@ function OperationDialog({
     value: String(item.id), label: item.name, subtitle: "Workshop",
     details: [["Services", item.type.replaceAll("_", " ")], ["Phone", item.phone], ["Address", item.address]],
   }));
-  const providerOptions = eligibleProviders.map((item): DetailOption => ({
-    value: String(item.id), label: item.name, subtitle: "Workshop provider",
-    details: [["Speciality", item.specialty], ["Phone", item.phone], ["Workshop", eligibleWorkshops.find((workshop) => workshop.id === item.workshopId)?.name ?? "Not recorded"]],
-  }));
+  const createWorkshop = async () => {
+    if (workshopCreating || newWorkshop.name.trim().length < 2) {
+      if (!workshopCreating)
+        toast.error("Enter the workshop name before saving it.");
+      return;
+    }
+    setWorkshopCreating(true);
+    try {
+      const created = await api.createDirectory("workshops", {
+        name: newWorkshop.name.trim(),
+        workshopType: newWorkshop.workshopType,
+        phone: newWorkshop.phone.trim() || null,
+        email: newWorkshop.email.trim() || null,
+        address: newWorkshop.address.trim() || null,
+      });
+      await refresh();
+      setJobWorkshop(String(created.id));
+      setAddingWorkshop(false);
+      setNewWorkshop({ name: "", workshopType: "BOTH", phone: "", email: "", address: "" });
+      toast.success("Workshop added and selected.");
+    } catch (createError) {
+      toast.error(
+        errorMessage(
+          createError,
+          "We could not add this workshop. Check the details and try again.",
+        ),
+      );
+    } finally {
+      setWorkshopCreating(false);
+    }
+  };
+  const createSalesman = async () => {
+    if (salesmanCreating || newSalesman.name.trim().length < 2) {
+      if (!salesmanCreating)
+        toast.error("Enter the salesman’s name before saving.");
+      return;
+    }
+    setSalesmanCreating(true);
+    try {
+      const name = newSalesman.name.trim();
+      await api.createDirectory("salesmen", {
+        name,
+        phone: newSalesman.phone.trim() || null,
+        email: newSalesman.email.trim() || null,
+        locality: newSalesman.locality.trim() || null,
+        notes: newSalesman.notes.trim() || null,
+      });
+      await refresh();
+      setSalesmanChoice(name);
+      setAddingSalesman(false);
+      setNewSalesman({ name: "", phone: "", email: "", locality: "", notes: "" });
+      toast.success("Salesman added and selected.");
+    } catch (createError) {
+      toast.error(
+        errorMessage(
+          createError,
+          "We could not add this salesman. Check the details and try again.",
+        ),
+      );
+    } finally {
+      setSalesmanCreating(false);
+    }
+  };
   return (
     <Dialog
       open={!!operation}
@@ -5335,12 +5592,25 @@ function OperationDialog({
                   </label>
                   <label>
                     Salesman
-                    <DetailedSelect
-                      name="salesman"
-                      required
-                      placeholder="Search salesman"
-                      options={ledger.salesmen.map((item) => ({ value: item.name, label: item.name, subtitle: "Salesman", details: [["Phone", item.phone], ["Email", item.email], ["Locality", item.locality], ["Notes", item.notes]] }))}
-                    />
+                    <div className="category-select-row">
+                      <DetailedSelect
+                        name="salesman"
+                        value={salesmanChoice}
+                        onValueChange={setSalesmanChoice}
+                        required
+                        placeholder="Search salesman"
+                        options={ledger.salesmen.map((item) => ({ value: item.name, label: item.name, subtitle: "Salesman", details: [["Phone", item.phone], ["Email", item.email], ["Locality", item.locality], ["Notes", item.notes]] }))}
+                      />
+                      <button
+                        type="button"
+                        className="category-add-button"
+                        aria-label="Add a new salesman"
+                        title="Add a new salesman"
+                        onClick={() => setAddingSalesman((current) => !current)}
+                      >
+                        <Plus size={17} />
+                      </button>
+                    </div>
                   </label>
                   <label>
                     Quoted price · LKR
@@ -5359,6 +5629,30 @@ function OperationDialog({
                     Handover date and time
                     <input name="handedOverAt" type="datetime-local" required />
                   </label>
+                  {addingSalesman && (
+                    <div className="ops-full inline-workshop-create">
+                      <div>
+                        <strong>Add a new salesman</strong>
+                        <small>Save this person to the directory and use them for this handover.</small>
+                      </div>
+                      <label>
+                        Salesman name *
+                        <input
+                          value={newSalesman.name}
+                          onChange={(event) => setNewSalesman((current) => ({ ...current, name: event.target.value }))}
+                          placeholder="Full name"
+                        />
+                      </label>
+                      <label>Phone<input value={newSalesman.phone} onChange={(event) => setNewSalesman((current) => ({ ...current, phone: event.target.value }))} type="tel" /></label>
+                      <label>Email<input value={newSalesman.email} onChange={(event) => setNewSalesman((current) => ({ ...current, email: event.target.value }))} type="email" /></label>
+                      <label>Locality<input value={newSalesman.locality} onChange={(event) => setNewSalesman((current) => ({ ...current, locality: event.target.value }))} placeholder="Town or district" /></label>
+                      <label className="ops-full">Notes<textarea value={newSalesman.notes} onChange={(event) => setNewSalesman((current) => ({ ...current, notes: event.target.value }))} rows={2} /></label>
+                      <div className="inline-workshop-actions ops-full">
+                        <button type="button" className="ops-secondary" disabled={salesmanCreating} onClick={() => setAddingSalesman(false)}>Cancel</button>
+                        <button type="button" className="primary-button" disabled={salesmanCreating} onClick={() => void createSalesman()}>{salesmanCreating ? "Saving salesman…" : "Save and select salesman"}</button>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
               {operation === "sales-return" && (
@@ -5404,37 +5698,80 @@ function OperationDialog({
                 <>
                   <label>
                     Process
-                    <DetailedSelect
+                    <CategorySelect
                       name="kind"
+                      categoryKey="PROCESS"
+                      categories={ledger.categories}
                       value={jobKind}
-                      onValueChange={(next) => setJobKind(next as "Cutting" | "Treatment")}
-                      options={[
-                        { value: "Cutting", label: "Cutting", subtitle: "Workshop process", details: [["Purpose", "Cut, shape or polish the stone"]] },
-                        { value: "Treatment", label: "Treatment", subtitle: "Workshop process", details: [["Purpose", "Apply or assess a gemstone treatment"]] },
-                      ]}
+                      onValueChange={(next) => {
+                        setJobKind(next);
+                        setJobWorkshop("");
+                      }}
+                      required
+                      placeholder="Select process"
+                      refresh={refresh}
                     />
                   </label>
                   <label>
                     Workshop
-                    <DetailedSelect
-                      name="workshopId"
-                      required
-                      value={selectedWorkshop}
-                      onValueChange={setJobWorkshop}
-                      options={workshopOptions}
-                      placeholder="Select workshop"
-                    />
+                    <div className="category-select-row">
+                      <DetailedSelect
+                        name="workshopId"
+                        required
+                        value={selectedWorkshop}
+                        onValueChange={setJobWorkshop}
+                        options={workshopOptions}
+                        placeholder="Select workshop"
+                      />
+                      <button
+                        type="button"
+                        className="category-add-button"
+                        aria-label="Add a new workshop"
+                        title="Add a new workshop"
+                        onClick={() =>
+                          setAddingWorkshop((current) => !current)
+                        }
+                      >
+                        <Plus size={17} />
+                      </button>
+                    </div>
                   </label>
-                  <label>
-                    Provider
-                    <DetailedSelect
-                      key={`${jobKind}-${selectedWorkshop}`}
-                      name="providerId"
-                      required
-                      options={providerOptions}
-                      placeholder="Select provider"
-                    />
-                  </label>
+                  {addingWorkshop && (
+                    <div className="ops-full inline-workshop-create">
+                      <div>
+                        <strong>Add a new workshop</strong>
+                        <small>Save it to the directory and use it for this job.</small>
+                      </div>
+                      <label>
+                        Workshop name *
+                        <input
+                          value={newWorkshop.name}
+                          onChange={(event) => setNewWorkshop((current) => ({ ...current, name: event.target.value }))}
+                          placeholder="Workshop or business name"
+                        />
+                      </label>
+                      <label>
+                        Services
+                        <DetailedSelect
+                          value={newWorkshop.workshopType}
+                          onValueChange={(workshopType) => setNewWorkshop((current) => ({ ...current, workshopType }))}
+                          options={[
+                            ["CUTTING", "Cutting"],
+                            ["TREATMENT", "Treatment"],
+                            ["BOTH", "Cutting and treatment"],
+                            ["ALL", "All services"],
+                          ].map(([value, label]) => ({ value, label, subtitle: "Workshop services", details: [["Services", label]] }))}
+                        />
+                      </label>
+                      <label>Phone<input value={newWorkshop.phone} onChange={(event) => setNewWorkshop((current) => ({ ...current, phone: event.target.value }))} type="tel" /></label>
+                      <label>Email<input value={newWorkshop.email} onChange={(event) => setNewWorkshop((current) => ({ ...current, email: event.target.value }))} type="email" /></label>
+                      <label className="ops-full">Address<input value={newWorkshop.address} onChange={(event) => setNewWorkshop((current) => ({ ...current, address: event.target.value }))} /></label>
+                      <div className="inline-workshop-actions ops-full">
+                        <button type="button" className="ops-secondary" disabled={workshopCreating} onClick={() => setAddingWorkshop(false)}>Cancel</button>
+                        <button type="button" className="primary-button" disabled={workshopCreating} onClick={() => void createWorkshop()}>{workshopCreating ? "Saving workshop…" : "Save and select workshop"}</button>
+                      </div>
+                    </div>
+                  )}
                   <label>
                     Handover date
                     <input
@@ -5465,7 +5802,7 @@ function OperationDialog({
               {operation === "dispatch" && (
                 <>
                   <div className="ops-context">
-                    {openJobs[0]?.id} · {openJobs[0]?.provider} · outgoing
+                    {openJobs[0]?.id} · {openJobs[0]?.workshop} · outgoing
                     weight {stone.weight.toFixed(2)} ct
                   </div>
                   <label>
@@ -5481,7 +5818,7 @@ function OperationDialog({
                 <>
                   <div className="ops-context">
                     Outgoing weight {openJobs[0]?.beforeWeight.toFixed(2)} ct ·{" "}
-                    {openJobs[0]?.provider}
+                    {openJobs[0]?.workshop}
                   </div>
                   <input
                     type="hidden"
