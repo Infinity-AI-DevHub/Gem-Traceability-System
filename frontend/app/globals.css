@@ -3,8 +3,11 @@
 @import "../vendor/shadcn-tailwind-4.13.0.css";
 :root {
   --ink: #17211f;
-  --forest: #153d36;
-  --emerald: #24594e;
+  --forest: #149777;
+  --emerald: #149777;
+  --green: #149777;
+  --deep-green: #0d6e58;
+  --soft-green: #e8f7f2;
   --cream: #f5f3ee;
   --paper: #fbfbf9;
   --line: #dedfd9;
@@ -128,8 +131,8 @@ button {
   padding: 48px 64px;
   color: #fff;
   background:
-    radial-gradient(circle at 80% 18%, #52847461, transparent 34%),
-    linear-gradient(150deg, #102d28, #173f37 56%, #0b2420);
+    radial-gradient(circle at 80% 18%, #72d9bd55, transparent 34%),
+    linear-gradient(150deg, #0c6d57, #149777 56%, #085744);
 }
 .login-story:before {
   content: "";
@@ -342,7 +345,7 @@ button {
   flex-direction: column;
   padding: 27px 18px 18px;
   color: #fff;
-  background: #14372f;
+  background: #0d765e;
   overflow: hidden;
   transition: width 0.22s ease, padding 0.22s ease;
 }
@@ -4875,4 +4878,114 @@ button:disabled { cursor: not-allowed; }
   .dashboard-expected-list .dashboard-kind { grid-column: 1/-1; }
   .dashboard-finance-grid { margin-inline: 14px; }
   .dashboard-report-link { width: calc(100% - 28px); margin-inline: 14px; }
+}
+
+/* Brand refresh: the brighter green is used consistently for primary actions
+   while softer tints keep dense operational screens easy to read. */
+.primary-button,
+.login-button,
+.table-footer button.active,
+.dashboard-report-link {
+  background: #149777;
+  box-shadow: 0 7px 18px rgb(20 151 119 / 24%);
+}
+.primary-button:hover,
+.login-button:hover,
+.dashboard-report-link:hover {
+  background: #108669;
+}
+.qr-scan-button {
+  border-color: rgb(20 151 119 / 38%);
+  background: #e8f7f2;
+  color: #0d6e58;
+}
+.notification-button,
+.eyebrow,
+.back-button:hover,
+.product-id,
+.category-add-button,
+.detail-preview-button,
+.mobile-wordmark,
+.mobile-dock > button.active,
+.mobile-dock .mobile-create {
+  color: #149777;
+}
+.notification-list > button.is-unread > i,
+.status-available i,
+.ops-progress b,
+.profitability > div > div i {
+  background: #149777;
+}
+.mobile-dock > button.active {
+  background: #e7f7f2;
+}
+.mobile-dock .mobile-create > span {
+  background: linear-gradient(145deg, #18a983, #0d765e);
+  box-shadow: 0 8px 20px rgb(20 151 119 / 32%);
+}
+.ops-shell .metric.accent {
+  border-color: #149777;
+  background: linear-gradient(145deg, #149777, #0d765e);
+  box-shadow: 0 12px 28px rgb(20 151 119 / 25%);
+}
+.sidebar nav button.active::before {
+  background: #62e2bd;
+}
+
+@media (max-width: 760px) {
+  body {
+    font-size: 16px;
+  }
+  .page-heading .eyebrow {
+    color: #16765f;
+    font-size: 10px;
+  }
+  .page-heading > div > p:last-child {
+    font-size: 13px;
+  }
+  .ops-shell .metric > span,
+  .panel-head p,
+  .ops-shell .metric > small,
+  .dashboard-priority small,
+  .dashboard-operation-card > small,
+  .dashboard-expected-list small,
+  .batch-source-options small,
+  .batch-stone-card > summary small {
+    font-size: 11px;
+  }
+  .ops-shell .metric > strong {
+    font-size: 23px;
+  }
+  .ops-fields label,
+  .ops-dialog-fields label,
+  .batch-stone-fields > label,
+  .ops-table,
+  .ops-row,
+  .ops-event,
+  .dashboard-priority strong,
+  .dashboard-operation-card > span,
+  .dashboard-expected-list strong {
+    font-size: 12px;
+  }
+  .ops-action,
+  .primary-button,
+  .ops-secondary,
+  .mobile-dock > button,
+  .mobile-dock .mobile-create small {
+    font-size: 10px;
+  }
+  .ops-action strong,
+  .primary-button,
+  .ops-secondary {
+    font-size: 13px;
+  }
+  .status,
+  .audit-kind,
+  .dashboard-kind {
+    font-size: 9px;
+  }
+  .panel-head h2,
+  .ops-section-head h2 {
+    font-size: 18px;
+  }
 }
